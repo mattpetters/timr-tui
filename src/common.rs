@@ -17,6 +17,8 @@ pub enum Content {
     Pomodoro,
     #[value(name = "localtime", alias = "l")]
     LocalTime,
+    #[value(name = "history", alias = "h")]
+    History,
 }
 
 #[derive(Clone, Debug)]

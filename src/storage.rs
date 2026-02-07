@@ -4,6 +4,7 @@ use crate::{
 };
 use color_eyre::eyre::Result;
 use serde::{Deserialize, Deserializer, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -21,8 +22,10 @@ where
     }
 }
 
+/// Record of a completed pomodoro session
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PomodoroRecord {
+    pub round: u64,
     pub label: String,
     pub mode: PomodoroMode,
     pub duration: Duration,
@@ -56,8 +59,10 @@ pub struct AppStorage {
     pub current_value_timer: Duration,
     // footer
     pub footer_app_time: Toggle,
-    // pomodoro label and history
-    pub pomodoro_label: String,
+    // pomodoro round labels (per-round custom labels)
+    #[serde(default)]
+    pub pomodoro_round_labels: HashMap<u64, String>,
+    // pomodoro history (completed sessions)
     #[serde(default)]
     pub pomodoro_history: Vec<PomodoroRecord>,
 }
@@ -91,8 +96,9 @@ impl Default for AppStorage {
             current_value_timer: Duration::ZERO,
             // footer
             footer_app_time: Toggle::Off,
-            // pomodoro label and history
-            pomodoro_label: String::new(),
+            // pomodoro round labels
+            pomodoro_round_labels: HashMap::new(),
+            // pomodoro history
             pomodoro_history: Vec::new(),
         }
     }

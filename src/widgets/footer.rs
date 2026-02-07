@@ -57,6 +57,7 @@ impl StatefulWidget for Footer {
             (Content::Timer, "[t]imer"),
             (Content::Pomodoro, "[p]omodoro"),
             (Content::LocalTime, "[l]ocal time"),
+            (Content::History, "[h]istory"),
         ]);
 
         let [_, area] =
@@ -180,8 +181,6 @@ impl StatefulWidget for Footer {
                                     if matches!(self.app_edit_mode, AppEditMode::Time)
                                         && self.selected_content == Content::Pomodoro {
                                         vec![
-                                            Span::from("[type to edit label]"),
-                                            Span::from(SPACE),
                                             Span::from("[backspace]delete"),
                                             Span::from(SPACE),
                                             Span::from("[enter]save"),

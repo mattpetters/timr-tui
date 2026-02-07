@@ -2,6 +2,7 @@ use crate::{
     common::Style,
     constants::TICK_VALUE_MS,
     events::{AppEventTx, TuiEvent, TuiEventHandler},
+    storage::PomodoroRecord,
     utils::center,
     widgets::clock::{ClockState, ClockStateArgs, ClockWidget, Countdown},
 };
@@ -13,8 +14,9 @@ use ratatui::{
     widgets::{StatefulWidget, Widget},
 };
 use serde::{Deserialize, Serialize};
-use std::{cmp::max, time::Duration};
+use std::{cmp::max, collections::HashMap, time::Duration};
 use strum::Display;
+use time::OffsetDateTime;
 
 #[derive(Debug, Clone, Display, Hash, Eq, PartialEq, Deserialize, Serialize)]
 pub enum Mode {
@@ -46,8 +48,10 @@ pub struct PomodoroState {
     mode: Mode,
     clock_map: ClockMap,
     round: u64,
-    label: String,
+    round_labels: HashMap<u64, String>,
     label_edit_mode: bool,
+    label_before_edit: String,
+    history: Vec<PomodoroRecord>,
 }
 
 pub struct PomodoroStateArgs {
@@ -59,7 +63,8 @@ pub struct PomodoroStateArgs {
     pub with_decis: bool,
     pub app_tx: AppEventTx,
     pub round: u64,
-    pub label: String,
+    pub round_labels: HashMap<u64, String>,
+    pub history: Vec<PomodoroRecord>,
 }
 
 impl PomodoroState {
@@ -73,7 +78,8 @@ impl PomodoroState {
             with_decis,
             app_tx,
             round,
-            label,
+            round_labels,
+            history,
         } = args;
         Self {
             mode,
@@ -96,8 +102,10 @@ impl PomodoroState {
                 .with_name("Pause".to_owned()),
             },
             round,
-            label,
+            round_labels,
             label_edit_mode: false,
+            label_before_edit: String::new(),
+            history,
         }
     }
 
@@ -134,11 +142,18 @@ impl PomodoroState {
     }
 
     pub fn get_label(&self) -> &str {
-        &self.label
+        self.round_labels
+            .get(&self.round)
+            .map(|s| s.as_str())
+            .unwrap_or("")
     }
 
-    pub fn set_label(&mut self, label: String) {
-        self.label = label;
+    pub fn get_round_labels(&self) -> &HashMap<u64, String> {
+        &self.round_labels
+    }
+
+    pub fn get_history(&self) -> &Vec<PomodoroRecord> {
+        &self.history
     }
 
     pub fn is_label_edit_mode(&self) -> bool {
@@ -146,7 +161,19 @@ impl PomodoroState {
     }
 
     pub fn toggle_label_edit_mode(&mut self) {
+        if !self.label_edit_mode {
+            // Entering edit mode - save current label
+            self.label_before_edit = self.get_label().to_string();
+        }
         self.label_edit_mode = !self.label_edit_mode;
+    }
+
+    fn set_current_round_label(&mut self, label: String) {
+        if label.is_empty() {
+            self.round_labels.remove(&self.round);
+        } else {
+            self.round_labels.insert(self.round, label);
+        }
     }
 
     pub fn set_with_decis(&mut self, with_decis: bool) {
@@ -159,6 +186,17 @@ impl PomodoroState {
             Mode::Pause => Mode::Work,
             Mode::Work => Mode::Pause,
         };
+    }
+
+    fn record_completed_session(&mut self) {
+        let record = PomodoroRecord {
+            round: self.round,
+            label: self.get_label().to_string(),
+            mode: self.mode.clone(),
+            duration: Duration::from(*self.get_clock().get_initial_value()),
+            completed_at: OffsetDateTime::now_utc(),
+        };
+        self.history.push(record);
     }
 }
 
@@ -173,14 +211,24 @@ impl TuiEventHandler for PomodoroState {
             }
             // LABEL EDIT mode
             TuiEvent::Key(key) if label_edit_mode => match key.code {
-                KeyCode::Enter | KeyCode::Esc => {
+                KeyCode::Enter => {
+                    // Save changes
+                    self.toggle_label_edit_mode();
+                }
+                KeyCode::Esc => {
+                    // Cancel changes - restore previous label
+                    self.set_current_round_label(self.label_before_edit.clone());
                     self.toggle_label_edit_mode();
                 }
                 KeyCode::Char(c) => {
-                    self.label.push(c);
+                    let mut label = self.get_label().to_string();
+                    label.push(c);
+                    self.set_current_round_label(label);
                 }
                 KeyCode::Backspace => {
-                    self.label.pop();
+                    let mut label = self.get_label().to_string();
+                    label.pop();
+                    self.set_current_round_label(label);
                 }
                 _ => return Some(event),
             },
@@ -254,8 +302,9 @@ impl TuiEventHandler for PomodoroState {
                 }
                 // reset current clock
                 KeyCode::Char('r') => {
-                    // increase round before (!!) resetting the clock
+                    // Record completed work session before incrementing round
                     if self.get_mode() == &Mode::Work && self.get_clock().is_done() {
+                        self.record_completed_session();
                         self.round += 1;
                     }
                     self.get_clock_mut().reset();
@@ -285,37 +334,32 @@ impl StatefulWidget for PomodoroWidget {
             ))
             .to_uppercase(),
         );
-        let label_round = Line::raw((format!("round {}", state.get_round(),)).to_uppercase());
-
-        // Display label with edit indicator if in edit mode
-        let label_task = if state.is_label_edit_mode() {
-            Line::raw(format!("Task: {}█", state.get_label()))
+        // Display round label: show custom label if exists, otherwise "ROUND X"
+        // When in edit mode, show cursor
+        let label_round = if state.is_label_edit_mode() {
+            Line::raw(format!("{}█", state.get_label()))
         } else if !state.get_label().is_empty() {
-            Line::raw(format!("Task: {}", state.get_label()))
+            Line::raw(state.get_label().to_string())
         } else {
-            Line::raw("")
+            Line::raw((format!("round {}", state.get_round())).to_uppercase())
         };
 
         let area = center(
             area,
             Constraint::Length(max(
-                max(
-                    clock_widget
-                        .get_width(state.get_clock().get_format(), state.get_clock().with_decis),
-                    label.width() as u16,
-                ),
-                label_task.width() as u16,
+                clock_widget
+                    .get_width(state.get_clock().get_format(), state.get_clock().with_decis),
+                max(label.width() as u16, label_round.width() as u16),
             )),
             Constraint::Length(
-                // empty label + height of `label` + `label_round` + `label_task`
-                clock_widget.get_height() + 4,
+                // empty line + height of `label` + `label_round`
+                clock_widget.get_height() + 3,
             ),
         );
 
-        let [v1, v2, v3, v4, v5] = Layout::vertical(Constraint::from_lengths([
+        let [v1, v2, v3, v4] = Layout::vertical(Constraint::from_lengths([
             1,
             clock_widget.get_height(),
-            1,
             1,
             1,
         ]))
@@ -327,14 +371,12 @@ impl StatefulWidget for PomodoroWidget {
         clock_widget.render(v2, buf, state.get_clock_mut());
         label.centered().render(v3, buf);
         label_round.centered().render(v4, buf);
-        label_task.centered().render(v5, buf);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::AppEventTx;
     use tokio::sync::mpsc;
 
     fn default_pomodoro_args() -> PomodoroStateArgs {
@@ -348,7 +390,8 @@ mod tests {
             with_decis: false,
             app_tx,
             round: 1,
-            label: String::new(),
+            round_labels: HashMap::new(),
+            history: Vec::new(),
         }
     }
 
@@ -361,8 +404,10 @@ mod tests {
     #[test]
     fn test_label_initialization() {
         let (app_tx, _rx) = mpsc::unbounded_channel();
+        let mut round_labels = HashMap::new();
+        round_labels.insert(1, "Test task".to_string());
         let args = PomodoroStateArgs {
-            label: "Test task".to_string(),
+            round_labels,
             app_tx,
             ..default_pomodoro_args()
         };
@@ -451,5 +496,100 @@ mod tests {
         )));
 
         assert!(!state.is_label_edit_mode());
+    }
+
+    #[test]
+    fn test_label_escape_cancels_changes() {
+        let (app_tx, _rx) = mpsc::unbounded_channel();
+        let mut round_labels = HashMap::new();
+        round_labels.insert(1, "original".to_string());
+        let args = PomodoroStateArgs {
+            round_labels,
+            app_tx,
+            ..default_pomodoro_args()
+        };
+        let mut state = PomodoroState::new(args);
+        assert_eq!(state.get_label(), "original");
+
+        // Enter edit mode
+        state.toggle_label_edit_mode();
+        assert!(state.is_label_edit_mode());
+
+        // Make some changes
+        state.update(TuiEvent::Key(crossterm::event::KeyEvent::from(
+            crossterm::event::KeyCode::Char('X')
+        )));
+        state.update(TuiEvent::Key(crossterm::event::KeyEvent::from(
+            crossterm::event::KeyCode::Char('Y')
+        )));
+        state.update(TuiEvent::Key(crossterm::event::KeyEvent::from(
+            crossterm::event::KeyCode::Char('Z')
+        )));
+        assert_eq!(state.get_label(), "originalXYZ");
+
+        // Press Esc to cancel
+        state.update(TuiEvent::Key(crossterm::event::KeyEvent::from(
+            crossterm::event::KeyCode::Esc
+        )));
+
+        // Should exit edit mode and restore original label
+        assert!(!state.is_label_edit_mode());
+        assert_eq!(state.get_label(), "original");
+    }
+
+    #[test]
+    fn test_labels_per_round() {
+        let (app_tx, _rx) = mpsc::unbounded_channel();
+        let mut round_labels = HashMap::new();
+        round_labels.insert(1, "Round 1 task".to_string());
+        round_labels.insert(2, "Round 2 task".to_string());
+
+        let args = PomodoroStateArgs {
+            round: 1,
+            round_labels,
+            app_tx,
+            ..default_pomodoro_args()
+        };
+        let mut state = PomodoroState::new(args);
+
+        // Check round 1 label
+        assert_eq!(state.get_label(), "Round 1 task");
+
+        // Move to round 2
+        state.round = 2;
+        assert_eq!(state.get_label(), "Round 2 task");
+
+        // Move to round 3 (no label)
+        state.round = 3;
+        assert_eq!(state.get_label(), "");
+    }
+
+    #[test]
+    fn test_label_persists_per_round() {
+        let mut state = PomodoroState::new(default_pomodoro_args());
+
+        // Set label for round 1
+        state.toggle_label_edit_mode();
+        state.update(TuiEvent::Key(crossterm::event::KeyEvent::from(
+            crossterm::event::KeyCode::Char('A')
+        )));
+        state.toggle_label_edit_mode();
+        assert_eq!(state.get_label(), "A");
+
+        // Move to round 2
+        state.round = 2;
+        assert_eq!(state.get_label(), ""); // No label for round 2 yet
+
+        // Set label for round 2
+        state.toggle_label_edit_mode();
+        state.update(TuiEvent::Key(crossterm::event::KeyEvent::from(
+            crossterm::event::KeyCode::Char('B')
+        )));
+        state.toggle_label_edit_mode();
+        assert_eq!(state.get_label(), "B");
+
+        // Go back to round 1
+        state.round = 1;
+        assert_eq!(state.get_label(), "A"); // Round 1 label should still be there
     }
 }

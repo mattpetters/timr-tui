@@ -11,6 +11,7 @@ use crate::{
         countdown::{Countdown, CountdownState, CountdownStateArgs},
         footer::{Footer, FooterState},
         header::Header,
+        history::{HistoryState, HistoryStateArgs, HistoryWidget},
         local_time::{LocalTimeState, LocalTimeStateArgs, LocalTimeWidget},
         pomodoro::{Mode as PomodoroMode, PomodoroState, PomodoroStateArgs, PomodoroWidget},
         timer::{Timer, TimerState},
@@ -27,6 +28,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     widgets::{StatefulWidget, Widget},
 };
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 use tracing::{debug, error};
@@ -50,6 +52,7 @@ pub struct App {
     timer: TimerState,
     pomodoro: PomodoroState,
     local_time: LocalTimeState,
+    history: HistoryState,
     style: Style,
     with_decis: bool,
     footer: FooterState,
@@ -65,7 +68,8 @@ pub struct AppArgs {
     pub content: Content,
     pub pomodoro_mode: PomodoroMode,
     pub pomodoro_round: u64,
-    pub pomodoro_label: String,
+    pub pomodoro_round_labels: HashMap<u64, String>,
+    pub pomodoro_history: Vec<crate::storage::PomodoroRecord>,
     pub initial_value_work: Duration,
     pub current_value_work: Duration,
     pub initial_value_pause: Duration,
@@ -116,7 +120,8 @@ impl From<FromAppArgs> for App {
             style: args.style.unwrap_or(stg.style),
             pomodoro_mode: stg.pomodoro_mode,
             pomodoro_round: stg.pomodoro_count,
-            pomodoro_label: stg.pomodoro_label,
+            pomodoro_round_labels: stg.pomodoro_round_labels,
+            pomodoro_history: stg.pomodoro_history,
             initial_value_work: args.work.unwrap_or(stg.inital_value_work),
             // invalidate `current_value_work` if an initial value is set via args
             current_value_work: args.work.unwrap_or(stg.current_value_work),
@@ -175,7 +180,8 @@ impl App {
             with_decis,
             pomodoro_mode,
             pomodoro_round,
-            pomodoro_label,
+            pomodoro_round_labels,
+            pomodoro_history,
             notification,
             blink,
             sound_path,
@@ -220,12 +226,16 @@ impl App {
                 current_value_pause,
                 with_decis,
                 round: pomodoro_round,
-                label: pomodoro_label,
+                round_labels: pomodoro_round_labels,
+                history: pomodoro_history.clone(),
                 app_tx: app_tx.clone(),
             }),
             local_time: LocalTimeState::new(LocalTimeStateArgs {
                 app_time,
                 app_time_format,
+            }),
+            history: HistoryState::new(HistoryStateArgs {
+                history: pomodoro_history,
             }),
             footer: FooterState::new(
                 show_menu,
@@ -252,6 +262,11 @@ impl App {
                 KeyCode::Char('t') => app.content = Content::Timer,
                 KeyCode::Char('p') => app.content = Content::Pomodoro,
                 KeyCode::Char('l') => app.content = Content::LocalTime,
+                KeyCode::Char('h') => {
+                    // Sync history before switching to history view
+                    app.history.set_history(app.pomodoro.get_history().clone());
+                    app.content = Content::History;
+                }
                 // toogle app time format
                 KeyCode::Char(':') => {
                     if app.content == Content::LocalTime {
@@ -315,6 +330,7 @@ impl App {
                 Content::Timer => app.timer.update(event.clone()),
                 Content::Pomodoro => app.pomodoro.update(event.clone()),
                 Content::LocalTime => app.local_time.update(event.clone()),
+                Content::History => app.history.update(event.clone()),
             } {
                 match unhandled {
                     events::TuiEvent::Render | events::TuiEvent::Resize => {
@@ -408,6 +424,7 @@ impl App {
                 }
             }
             Content::LocalTime => AppEditMode::None,
+            Content::History => AppEditMode::None,
         }
     }
 
@@ -416,8 +433,9 @@ impl App {
             Content::Countdown => self.countdown.is_running(),
             Content::Timer => self.timer.get_clock().is_running(),
             Content::Pomodoro => self.pomodoro.get_clock().is_running(),
-            // `LocalTime` does not use a `Clock`
+            // `LocalTime` and `History` do not use a `Clock`
             Content::LocalTime => false,
+            Content::History => false,
         }
     }
 
@@ -427,6 +445,7 @@ impl App {
             Content::Timer => None,
             Content::Pomodoro => Some(self.pomodoro.get_clock().get_percentage_done()),
             Content::LocalTime => None,
+            Content::History => None,
         }
     }
 
@@ -448,7 +467,8 @@ impl App {
             with_decis: self.with_decis,
             pomodoro_mode: self.pomodoro.get_mode().clone(),
             pomodoro_count: self.pomodoro.get_round(),
-            pomodoro_label: self.pomodoro.get_label().to_string(),
+            pomodoro_round_labels: self.pomodoro.get_round_labels().clone(),
+            pomodoro_history: self.pomodoro.get_history().clone(),
             inital_value_work: Duration::from(*self.pomodoro.get_clock_work().get_initial_value()),
             current_value_work: Duration::from(*self.pomodoro.get_clock_work().get_current_value()),
             inital_value_pause: Duration::from(
@@ -464,7 +484,6 @@ impl App {
             elapsed_value_countdown: Duration::from(*self.countdown.get_elapsed_value()),
             current_value_timer: Duration::from(*self.timer.get_clock().get_current_value()),
             footer_app_time: self.footer.app_time_format().is_some().into(),
-            pomodoro_history: Vec::new(), // History is loaded from storage, not generated here
         }
     }
 }
@@ -493,6 +512,9 @@ impl AppWidget {
             .render(area, buf, &mut state.pomodoro),
             Content::LocalTime => {
                 LocalTimeWidget { style: state.style }.render(area, buf, &mut state.local_time);
+            }
+            Content::History => {
+                HistoryWidget.render(area, buf, &mut state.history);
             }
         };
     }
