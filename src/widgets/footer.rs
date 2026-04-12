@@ -4,7 +4,7 @@ use crate::common::{AppEditMode, AppTime, AppTimeFormat, Content};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Layout, Rect},
-    style::{Modifier, Style},
+    style::Style,
     symbols::{border, scrollbar},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Row, StatefulWidget, Table, Widget},
@@ -14,13 +14,19 @@ use ratatui::{
 pub struct FooterState {
     show_menu: bool,
     app_time_format: Option<AppTimeFormat>,
+    vim_motions: bool,
 }
 
 impl FooterState {
-    pub const fn new(show_menu: bool, app_time_format: Option<AppTimeFormat>) -> Self {
+    pub const fn new(
+        show_menu: bool,
+        app_time_format: Option<AppTimeFormat>,
+        vim_motions: bool,
+    ) -> Self {
         Self {
             show_menu,
             app_time_format,
+            vim_motions,
         }
     }
 
@@ -49,14 +55,42 @@ pub struct Footer {
     pub app_time: AppTime,
 }
 
+const SPACE: &str = " "; // single (empty) SPACE
+const WIDE_SPACE: &str = "   "; // three (empty) SPACEs
+const BOLD: Style = Style::new().bold();
+const ITALIC: Style = Style::new().italic();
+
 impl StatefulWidget for Footer {
     type State = FooterState;
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        let symbol_left = if state.vim_motions {
+            "h"
+        } else {
+            scrollbar::HORIZONTAL.begin
+        };
+
+        let symbol_right = if state.vim_motions {
+            "l"
+        } else {
+            scrollbar::HORIZONTAL.end
+        };
+        let symbol_up = if state.vim_motions {
+            "k"
+        } else {
+            scrollbar::VERTICAL.begin
+        };
+        let symbol_down = if state.vim_motions {
+            "j"
+        } else {
+            scrollbar::VERTICAL.end
+        };
+
         let content_labels: BTreeMap<Content, &str> = BTreeMap::from([
-            (Content::Countdown, "[c]ountdown"),
-            (Content::Timer, "[t]imer"),
-            (Content::Pomodoro, "[p]omodoro"),
-            (Content::LocalTime, "[l]ocal time"),
+            (Content::Countdown, "countdown"),
+            (Content::Timer, "timer"),
+            (Content::Pomodoro, "pomodoro"),
+            (Content::Event, "event"),
+            (Content::LocalTime, "local time"),
         ]);
 
         let [_, area] =
@@ -67,204 +101,280 @@ impl StatefulWidget for Footer {
 
         Block::new()
             .borders(Borders::TOP)
+            .title(Line::from(vec![
+                Span::styled("m", BOLD),
+                Span::from(SPACE),
+                Span::from(if state.show_menu { "hide" } else { "show" }),
+                Span::from(SPACE),
+                Span::from("menu"),
+                Span::from(SPACE),
+            ]))
             .title(
-                format! {"[m]enu {:} ", if state.show_menu {scrollbar::VERTICAL.end} else {scrollbar::VERTICAL.begin}},
+                Line::from(match (state.app_time_format, self.selected_content) {
+                    // Show time
+                    (Some(v), content) if content != Content::LocalTime => format!(
+                        "{SPACE}{}{SPACE}", // keep SPACE around
+                        self.app_time.format(&v)
+                    ),
+                    // Hide time -> empty string
+                    _ => "".into(),
+                })
+                .right_aligned(),
             )
-            .title(
-                Line::from(
-                    match (state.app_time_format, self.selected_content) {
-                        // Show time
-                        (Some(v), content) if content != Content::LocalTime => format!(" {} " // add some space around
-                            , self.app_time.format(&v)),
-                        // Hide time -> empty
-                        _ => "".into(),
-                    }
-                ).right_aligned())
             .border_set(border::PLAIN)
             .render(border_area, buf);
         // show menu
         if state.show_menu {
-            let content_labels: Vec<Span> = content_labels
+            let mut content_labels: Vec<Span> = content_labels
                 .iter()
                 .enumerate()
-                .map(|(index, (content, label))| {
-                    let mut style = Style::default();
-                    // Add space for all except last
-                    let label = if index < content_labels.len() - 1 {
-                        format!("{label}  ")
-                    } else {
+                .flat_map(|(index, (content, label))| {
+                    let no = index + 1;
+                    let is_last = index == content_labels.len() - 1;
+                    let is_selected = *content == self.selected_content;
+                    let label_text = if is_last {
                         label.to_string()
+                    } else {
+                        format!("{label}{WIDE_SPACE}")
                     };
-                    if *content == self.selected_content {
-                        style = style.add_modifier(Modifier::BOLD);
-                    }
-                    Span::styled(label, style)
+                    [
+                        Span::styled(format!("{no}"), BOLD),
+                        Span::from(SPACE),
+                        Span::styled(label_text, if is_selected { BOLD.italic() } else { ITALIC }),
+                    ]
                 })
                 .collect();
 
-            const SPACE: &str = "  "; // 2 empty spaces
+            content_labels.extend_from_slice(&[
+                Span::from(WIDE_SPACE),
+                Span::styled(symbol_left, BOLD),
+                Span::from(SPACE),
+                Span::from("or"),
+                Span::from(SPACE),
+                Span::styled(symbol_right, BOLD),
+                Span::from(SPACE),
+                Span::styled("switch screens", ITALIC),
+            ]);
+
             let widths = [Constraint::Length(12), Constraint::Percentage(100)];
             let mut table_rows = vec![
                 // screens
                 Row::new(vec![
-                    Cell::from(Span::styled(
-                        "screens",
-                        Style::default().add_modifier(Modifier::BOLD),
-                    )),
+                    Cell::from(Span::from("screens")),
                     Cell::from(Line::from(content_labels)),
                 ]),
                 // appearance
                 Row::new(vec![
-                    Cell::from(Span::styled(
-                        "appearance",
-                        Style::default().add_modifier(Modifier::BOLD),
-                    )),
+                    Cell::from(Span::from("appearance")),
                     Cell::from(Line::from(vec![
-                        Span::from("[,]change style"),
+                        Span::styled(",", BOLD),
                         Span::from(SPACE),
-                        Span::from("[.]toggle deciseconds"),
+                        Span::styled("change style", ITALIC),
+                        Span::from(WIDE_SPACE),
+                        Span::styled(".", BOLD),
                         Span::from(SPACE),
-                        Span::from(format!(
-                            "[:]toggle {} time",
-                            match self.app_time {
-                                AppTime::Local(_) => "local",
-                                AppTime::Utc(_) => "utc",
-                            }
-                        )),
+                        Span::styled("toggle deciseconds", ITALIC),
+                        Span::from(WIDE_SPACE),
+                        Span::styled(":", BOLD),
+                        Span::from(SPACE),
+                        Span::styled(
+                            format!(
+                                "toggle {} time",
+                                match self.app_time {
+                                    AppTime::Local(_) => "local",
+                                    AppTime::Utc(_) => "utc",
+                                }
+                            ),
+                            ITALIC,
+                        ),
                     ])),
                 ]),
             ];
 
+            // Controls (except for `localtime`)
             if self.selected_content != Content::LocalTime {
                 table_rows.extend_from_slice(&[
                     // controls - 1. row
                     Row::new(vec![
-                        Cell::from(Span::styled(
-                            "controls",
-                            Style::default().add_modifier(Modifier::BOLD),
-                        )),
+                        Cell::from(Span::from("controls")),
                         Cell::from(Line::from({
                             match self.app_edit_mode {
-                                AppEditMode::None => {
-                                    let mut spans = vec![Span::from(if self.running_clock {
-                                        "[s]top"
-                                    } else {
-                                        "[s]tart"
-                                    })];
-                                    spans.extend_from_slice(&[
+                                AppEditMode::None if self.selected_content != Content::Event => {
+                                    let mut spans = vec![
+                                        Span::styled("space", BOLD),
                                         Span::from(SPACE),
-                                        Span::from("[e]dit"),
+                                        Span::styled(
+                                            if self.running_clock { "stop" } else { "start" },
+                                            ITALIC,
+                                        ),
+                                    ];
+                                    spans.extend_from_slice(&[
+                                        Span::from(WIDE_SPACE),
+                                        Span::styled("e", BOLD),
+                                        Span::from(SPACE),
+                                        Span::styled("edit", ITALIC),
                                     ]);
                                     if self.selected_content == Content::Countdown {
                                         spans.extend_from_slice(&[
+                                            Span::from(WIDE_SPACE),
+                                            Span::styled("^e", BOLD),
                                             Span::from(SPACE),
-                                            Span::from("[^e]dit by local time"),
+                                            Span::styled("edit by local time", ITALIC),
                                         ]);
                                     }
                                     spans.extend_from_slice(&[
+                                        Span::from(WIDE_SPACE),
+                                        Span::styled("r", BOLD),
                                         Span::from(SPACE),
-                                        Span::from("[r]eset clock"),
+                                        Span::styled("reset clock", ITALIC),
                                     ]);
                                     if self.selected_content == Content::Pomodoro {
                                         spans.extend_from_slice(&[
+                                            Span::from(WIDE_SPACE),
+                                            Span::styled("^r", BOLD),
                                             Span::from(SPACE),
-                                            Span::from("[^r]eset clocks+rounds"),
+                                            Span::styled("reset clocks/rounds", ITALIC),
+                                            Span::from(WIDE_SPACE),
+                                            Span::styled("n", BOLD),
                                             Span::from(SPACE),
-                                            Span::from("[n]label task"),
+                                            Span::styled("label task", ITALIC),
                                         ]);
                                     }
                                     spans
                                 }
-                                _ => {
-                                    // Check if we're in label edit mode for Pomodoro
-                                    if matches!(self.app_edit_mode, AppEditMode::Time)
-                                        && self.selected_content == Content::Pomodoro {
+                                AppEditMode::None if self.selected_content == Content::Event => {
+                                    vec![
+                                        Span::styled("e", BOLD),
+                                        Span::from(SPACE),
+                                        Span::styled("edit", ITALIC),
+                                    ]
+                                }
+                                AppEditMode::Clock | AppEditMode::Time | AppEditMode::Event => {
+                                    // Label edit mode: Pomodoro + Time is repurposed for task label editing
+                                    if self.app_edit_mode == AppEditMode::Time
+                                        && self.selected_content == Content::Pomodoro
+                                    {
                                         vec![
-                                            Span::from("[type to edit label]"),
+                                            Span::styled("type", BOLD),
                                             Span::from(SPACE),
-                                            Span::from("[backspace]delete"),
+                                            Span::styled("edit label", ITALIC),
+                                            Span::from(WIDE_SPACE),
+                                            Span::styled("backspace", BOLD),
                                             Span::from(SPACE),
-                                            Span::from("[enter]save"),
+                                            Span::styled("delete", ITALIC),
+                                            Span::from(WIDE_SPACE),
+                                            Span::styled("enter", BOLD),
                                             Span::from(SPACE),
-                                            Span::from("[esc]cancel"),
+                                            Span::styled("save", ITALIC),
+                                            Span::from(WIDE_SPACE),
+                                            Span::styled("esc", BOLD),
+                                            Span::from(SPACE),
+                                            Span::styled("cancel", ITALIC),
                                         ]
                                     } else {
-                                        let mut spans = vec![Span::from("[s]ave changes")];
+                                        let mut spans = vec![
+                                            Span::styled("s", BOLD),
+                                            Span::from(SPACE),
+                                            Span::styled("save changes", ITALIC),
+                                        ];
+
+                                        if self.selected_content == Content::Event {
+                                            spans[0] = Span::styled("enter", BOLD);
+                                        };
+
                                         if self.selected_content == Content::Countdown
                                             || self.selected_content == Content::Pomodoro
                                         {
                                             spans.extend_from_slice(&[
+                                                Span::from(WIDE_SPACE),
+                                                Span::styled("^s", BOLD),
                                                 Span::from(SPACE),
-                                                Span::from("[^s]ave initial value"),
+                                                Span::styled("save initial value", ITALIC),
                                             ]);
                                         }
                                         spans.extend_from_slice(&[
+                                            Span::from(WIDE_SPACE),
+                                            Span::styled("esc", BOLD),
                                             Span::from(SPACE),
-                                            Span::from("[esc]skip changes"),
+                                            Span::styled("skip changes", ITALIC),
                                         ]);
+
+                                        if self.selected_content == Content::Event {
+                                            spans.extend_from_slice(&[
+                                                Span::from(WIDE_SPACE),
+                                                Span::styled("tab", BOLD),
+                                                Span::from(SPACE),
+                                                Span::styled("switch input", ITALIC),
+                                            ]);
+                                        }
                                         spans
                                     }
                                 }
+                                _ => vec![],
                             }
                         })),
                     ]),
                     // controls - 2. row
-                    Row::new(vec![
-                        Cell::from(Line::from("")),
-                        Cell::from(Line::from({
-                            match self.app_edit_mode {
-                                AppEditMode::None => {
-                                    let mut spans = vec![];
-                                    if self.selected_content == Content::Pomodoro {
-                                        spans.extend_from_slice(&[Span::from(
-                                            "[← →]switch work/pause",
-                                        )]);
+                    Row::new(if self.selected_content == Content::Event {
+                        vec![]
+                    } else {
+                        vec![
+                            Cell::from(Line::from("")),
+                            Cell::from(Line::from({
+                                match self.app_edit_mode {
+                                    AppEditMode::None => {
+                                        let mut spans = vec![];
+                                        if self.selected_content == Content::Pomodoro {
+                                            spans.extend_from_slice(&[
+                                                Span::styled(format!("^{}", symbol_left), BOLD),
+                                                Span::from(SPACE),
+                                                Span::from("or"),
+                                                Span::from(SPACE),
+                                                Span::styled(format!("^{}", symbol_right), BOLD),
+                                                Span::from(SPACE),
+                                                Span::styled("switch work/pause screens", ITALIC),
+                                            ]);
+                                        }
+                                        spans
                                     }
-                                    spans
+                                    _ => {
+                                        // Don't show arrow instructions in label edit mode
+                                        if self.app_edit_mode == AppEditMode::Time
+                                            && self.selected_content == Content::Pomodoro
+                                        {
+                                            vec![]
+                                        } else {
+                                            vec![
+                                                Span::styled(symbol_left, BOLD),
+                                                Span::from(SPACE),
+                                                Span::from("or"),
+                                                Span::from(SPACE),
+                                                Span::styled(symbol_right, BOLD),
+                                                Span::from(SPACE),
+                                                Span::styled("move selection", ITALIC),
+                                                Span::from(WIDE_SPACE),
+                                                Span::styled(symbol_up, BOLD),
+                                                Span::from(SPACE),
+                                                Span::styled("edit up", ITALIC),
+                                                Span::from(WIDE_SPACE),
+                                                Span::styled(format!("^{}", symbol_up), BOLD),
+                                                Span::from(SPACE),
+                                                Span::styled("edit up fast", ITALIC),
+                                                Span::from(WIDE_SPACE),
+                                                Span::styled(symbol_down, BOLD),
+                                                Span::from(SPACE),
+                                                Span::styled("edit down", ITALIC),
+                                                Span::from(WIDE_SPACE),
+                                                Span::styled(format!("^{}", symbol_down), BOLD),
+                                                Span::from(SPACE),
+                                                Span::styled("edit down fast", ITALIC),
+                                            ]
+                                        }
+                                    },
                                 }
-                                _ => {
-                                    // Don't show arrow instructions in label edit mode
-                                    if matches!(self.app_edit_mode, AppEditMode::Time)
-                                        && self.selected_content == Content::Pomodoro {
-                                        vec![]
-                                    } else {
-                                        vec![
-                                            Span::from(format!(
-                                                // ← →,
-                                                "[{} {}]change selection",
-                                                scrollbar::HORIZONTAL.begin,
-                                                scrollbar::HORIZONTAL.end
-                                            )),
-                                            Span::from(SPACE),
-                                            Span::from(format!(
-                                                // ↑
-                                                "[{}]edit up",
-                                                scrollbar::VERTICAL.begin
-                                            )),
-                                            Span::from(SPACE),
-                                            Span::from(format!(
-                                                // ctrl + ↑
-                                                "[^{}]edit up 10x",
-                                                scrollbar::VERTICAL.begin
-                                            )),
-                                            Span::from(SPACE),
-                                            Span::from(format!(
-                                                // ↓
-                                                "[{}]edit up",
-                                                scrollbar::VERTICAL.end
-                                            )),
-                                            Span::from(SPACE),
-                                            Span::from(format!(
-                                                // ctrl + ↓
-                                                "[^{}]edit up 10x",
-                                                scrollbar::VERTICAL.end
-                                            )),
-                                        ]
-                                    }
-                                },
-                            }
-                        })),
-                    ]),
+                            })),
+                        ]
+                    }),
                 ])
             }
 

@@ -11,14 +11,14 @@ use ratatui::{
     widgets::{StatefulWidget, Widget},
 };
 
+use crate::widgets::clock_elements::FOUR_DIGITS_WIDTH;
 use crate::{
     common::{ClockTypeId, Style as DigitStyle},
     duration::{
-        DurationEx, MAX_DURATION, ONE_DAY, ONE_DECI_SECOND, ONE_HOUR, ONE_MINUTE, ONE_SECOND,
-        ONE_YEAR,
+        ClockDuration, DurationEx, MAX_DURATION, ONE_DAY, ONE_DECI_SECOND, ONE_HOUR, ONE_MINUTE,
+        ONE_SECOND, ONE_YEAR,
     },
     events::{AppEvent, AppEventTx},
-    utils::center_horizontal,
     widgets::clock_elements::{
         COLON_WIDTH, Colon, DIGIT_HEIGHT, DIGIT_LABEL_WIDTH, DIGIT_SPACE_WIDTH, DIGIT_WIDTH,
         DOT_WIDTH, Digit, Dot, THREE_DIGITS_WIDTH, TWO_DIGITS_WIDTH,
@@ -88,10 +88,19 @@ pub enum Format {
     YyyDHhMmSs,
     YyyDdHhMmSs,
     YyyDddHhMmSs,
+    YyyyDHhMmSs,
+    YyyyDdHhMmSs,
+    YyyyDddHhMmSs,
 }
 
-pub fn format_by_duration(d: &DurationEx) -> Format {
-    if d.years() >= 100 && d.days_mod() >= 100 {
+pub fn format_by_duration<D: ClockDuration>(d: &D) -> Format {
+    if d.years() >= 1000 && d.days_mod() >= 100 {
+        Format::YyyyDddHhMmSs
+    } else if d.years() >= 1000 && d.days_mod() >= 10 {
+        Format::YyyyDdHhMmSs
+    } else if d.years() >= 1000 && d.days() >= 1 {
+        Format::YyyyDHhMmSs
+    } else if d.years() >= 100 && d.days_mod() >= 100 {
         Format::YyyDddHhMmSs
     } else if d.years() >= 100 && d.days_mod() >= 10 {
         Format::YyyDdHhMmSs
@@ -140,7 +149,10 @@ pub fn time_by_format(format: &Format) -> Time {
         | Format::YyDHhMmSs
         | Format::YyyDddHhMmSs
         | Format::YyyDdHhMmSs
-        | Format::YyyDHhMmSs => Time::Years,
+        | Format::YyyDHhMmSs
+        | Format::YyyyDddHhMmSs
+        | Format::YyyyDdHhMmSs
+        | Format::YyyyDHhMmSs => Time::Years,
         Format::DddHhMmSs | Format::DdHhMmSs | Format::DHhMmSs => Time::Days,
         Format::HhMmSs | Format::HMmSs => Time::Hours,
         Format::MmSs | Format::MSs => Time::Minutes,
@@ -161,7 +173,7 @@ pub fn count_by_mode(times: u32, mode: &Mode) -> Duration {
 }
 
 const RANGE_OF_DONE_COUNT: u64 = 4;
-const MAX_DONE_COUNT: u64 = RANGE_OF_DONE_COUNT * 5;
+pub const MAX_DONE_COUNT: u64 = RANGE_OF_DONE_COUNT * 5;
 
 pub struct ClockState<T> {
     type_id: ClockTypeId,
@@ -437,7 +449,7 @@ impl<T> ClockState<T> {
     }
 
     fn update_format(&mut self) {
-        let d = self.get_current_value();
+        let d: &DurationEx = self.get_current_value();
         self.format = format_by_duration(d);
     }
 
@@ -447,16 +459,15 @@ impl<T> ClockState<T> {
     /// `tick` won't be called again after `Mode::Done` event (e.g. in `widget::Countdown`).
     /// That's why `update_done_count` is called from "outside".
     pub fn update_done_count(&mut self) {
-        if let Some(count) = self.done_count {
-            if count > 0 {
-                let value = count - 1;
-                self.done_count = Some(value)
-            } else {
-                // None means we are done and no counting anymore.
-                self.done_count = None
-            }
-        }
+        self.done_count = count_clock_done(self.done_count);
     }
+}
+
+/// Safe way to count a possible `done` value
+pub fn count_clock_done(value: Option<u64>) -> Option<u64> {
+    // Safe substraction for `Some(value > 1)`
+    // `None` means `done` == no counting anymore.
+    value.and_then(|count| count.checked_sub(1))
 }
 
 #[derive(Debug, Clone)]
@@ -642,251 +653,996 @@ where
         }
     }
 
-    fn get_horizontal_lengths(&self, format: &Format, with_decis: bool) -> Vec<u16> {
-        let add_decis = |mut lengths: Vec<u16>, with_decis: bool| -> Vec<u16> {
-            if with_decis {
-                lengths.extend_from_slice(&[
-                    DOT_WIDTH,   // .
-                    DIGIT_WIDTH, // ds
-                ])
-            }
-            lengths
-        };
-
-        const LABEL_WIDTH: u16 = DIGIT_LABEL_WIDTH + DIGIT_SPACE_WIDTH;
-
-        match format {
-            Format::YyyDddHhMmSs => add_decis(
-                vec![
-                    THREE_DIGITS_WIDTH, // y_y_y
-                    LABEL_WIDTH,        // _l__
-                    THREE_DIGITS_WIDTH, // d_d_d
-                    LABEL_WIDTH,        // _l__
-                    TWO_DIGITS_WIDTH,   // h_h
-                    COLON_WIDTH,        // :
-                    TWO_DIGITS_WIDTH,   // m_m
-                    COLON_WIDTH,        // :
-                    TWO_DIGITS_WIDTH,   // s_s
-                ],
-                with_decis,
-            ),
-            Format::YyyDdHhMmSs => add_decis(
-                vec![
-                    THREE_DIGITS_WIDTH, // y_y_y
-                    LABEL_WIDTH,        // _l__
-                    TWO_DIGITS_WIDTH,   // d_d
-                    LABEL_WIDTH,        // _l__
-                    TWO_DIGITS_WIDTH,   // h_h
-                    COLON_WIDTH,        // :
-                    TWO_DIGITS_WIDTH,   // m_m
-                    COLON_WIDTH,        // :
-                    TWO_DIGITS_WIDTH,   // s_s
-                ],
-                with_decis,
-            ),
-            Format::YyyDHhMmSs => add_decis(
-                vec![
-                    THREE_DIGITS_WIDTH, // y_y_y
-                    LABEL_WIDTH,        // _l__
-                    DIGIT_WIDTH,        // d
-                    LABEL_WIDTH,        // _l__
-                    TWO_DIGITS_WIDTH,   // h_h
-                    COLON_WIDTH,        // :
-                    TWO_DIGITS_WIDTH,   // m_m
-                    COLON_WIDTH,        // :
-                    TWO_DIGITS_WIDTH,   // s_s
-                ],
-                with_decis,
-            ),
-            Format::YyDddHhMmSs => add_decis(
-                vec![
-                    TWO_DIGITS_WIDTH,   // y_y
-                    LABEL_WIDTH,        // _l__
-                    THREE_DIGITS_WIDTH, // d_d_d
-                    LABEL_WIDTH,        // _l__
-                    TWO_DIGITS_WIDTH,   // h_h
-                    COLON_WIDTH,        // :
-                    TWO_DIGITS_WIDTH,   // m_m
-                    COLON_WIDTH,        // :
-                    TWO_DIGITS_WIDTH,   // s_s
-                ],
-                with_decis,
-            ),
-            Format::YyDdHhMmSs => add_decis(
-                vec![
-                    TWO_DIGITS_WIDTH, // y_y
-                    LABEL_WIDTH,      // _l__
-                    TWO_DIGITS_WIDTH, // d_d
-                    LABEL_WIDTH,      // _l__
-                    TWO_DIGITS_WIDTH, // h_h
-                    COLON_WIDTH,      // :
-                    TWO_DIGITS_WIDTH, // m_m
-                    COLON_WIDTH,      // :
-                    TWO_DIGITS_WIDTH, // s_s
-                ],
-                with_decis,
-            ),
-            Format::YyDHhMmSs => add_decis(
-                vec![
-                    TWO_DIGITS_WIDTH, // y_y
-                    LABEL_WIDTH,      // _l__
-                    DIGIT_WIDTH,      // d
-                    LABEL_WIDTH,      // _l__
-                    TWO_DIGITS_WIDTH, // h_h
-                    COLON_WIDTH,      // :
-                    TWO_DIGITS_WIDTH, // m_m
-                    COLON_WIDTH,      // :
-                    TWO_DIGITS_WIDTH, // s_s
-                ],
-                with_decis,
-            ),
-            Format::YDddHhMmSs => add_decis(
-                vec![
-                    DIGIT_WIDTH,        // Y
-                    LABEL_WIDTH,        // _l__
-                    THREE_DIGITS_WIDTH, // d_d_d
-                    LABEL_WIDTH,        // _l__
-                    TWO_DIGITS_WIDTH,   // h_h
-                    COLON_WIDTH,        // :
-                    TWO_DIGITS_WIDTH,   // m_m
-                    COLON_WIDTH,        // :
-                    TWO_DIGITS_WIDTH,   // s_s
-                ],
-                with_decis,
-            ),
-            Format::YDdHhMmSs => add_decis(
-                vec![
-                    DIGIT_WIDTH,      // Y
-                    LABEL_WIDTH,      // _l__
-                    TWO_DIGITS_WIDTH, // d_d
-                    LABEL_WIDTH,      // _l__
-                    TWO_DIGITS_WIDTH, // h_h
-                    COLON_WIDTH,      // :
-                    TWO_DIGITS_WIDTH, // m_m
-                    COLON_WIDTH,      // :
-                    TWO_DIGITS_WIDTH, // s_s
-                ],
-                with_decis,
-            ),
-            Format::YDHhMmSs => add_decis(
-                vec![
-                    DIGIT_WIDTH,      // Y
-                    LABEL_WIDTH,      // _l__
-                    DIGIT_WIDTH,      // d
-                    LABEL_WIDTH,      // _l__
-                    TWO_DIGITS_WIDTH, // h_h
-                    COLON_WIDTH,      // :
-                    TWO_DIGITS_WIDTH, // m_m
-                    COLON_WIDTH,      // :
-                    TWO_DIGITS_WIDTH, // s_s
-                ],
-                with_decis,
-            ),
-
-            Format::DddHhMmSs => add_decis(
-                vec![
-                    THREE_DIGITS_WIDTH, // d_d_d
-                    LABEL_WIDTH,        // _l__
-                    TWO_DIGITS_WIDTH,   // h_h
-                    COLON_WIDTH,        // :
-                    TWO_DIGITS_WIDTH,   // m_m
-                    COLON_WIDTH,        // :
-                    TWO_DIGITS_WIDTH,   // s_s
-                ],
-                with_decis,
-            ),
-            Format::DdHhMmSs => add_decis(
-                vec![
-                    TWO_DIGITS_WIDTH, // d_d
-                    LABEL_WIDTH,      // _l__
-                    TWO_DIGITS_WIDTH, // h_h
-                    COLON_WIDTH,      // :
-                    TWO_DIGITS_WIDTH, // m_m
-                    COLON_WIDTH,      // :
-                    TWO_DIGITS_WIDTH, // s_s
-                ],
-                with_decis,
-            ),
-            Format::DHhMmSs => add_decis(
-                vec![
-                    DIGIT_WIDTH,      // D
-                    LABEL_WIDTH,      // _l__
-                    TWO_DIGITS_WIDTH, // h_h
-                    COLON_WIDTH,      // :
-                    TWO_DIGITS_WIDTH, // m_m
-                    COLON_WIDTH,      // :
-                    TWO_DIGITS_WIDTH, // s_s
-                ],
-                with_decis,
-            ),
-            Format::HhMmSs => add_decis(
-                vec![
-                    TWO_DIGITS_WIDTH, // h_h
-                    COLON_WIDTH,      // :
-                    TWO_DIGITS_WIDTH, // m_m
-                    COLON_WIDTH,      // :
-                    TWO_DIGITS_WIDTH, // s_s
-                ],
-                with_decis,
-            ),
-            Format::HMmSs => add_decis(
-                vec![
-                    DIGIT_WIDTH,      // h
-                    COLON_WIDTH,      // :
-                    TWO_DIGITS_WIDTH, // m_m
-                    COLON_WIDTH,      // :
-                    TWO_DIGITS_WIDTH, // s_s
-                ],
-                with_decis,
-            ),
-            Format::MmSs => add_decis(
-                vec![
-                    TWO_DIGITS_WIDTH, // m_m
-                    COLON_WIDTH,      // :
-                    TWO_DIGITS_WIDTH, // s_s
-                ],
-                with_decis,
-            ),
-            Format::MSs => add_decis(
-                vec![
-                    DIGIT_WIDTH,      // m
-                    COLON_WIDTH,      // :
-                    TWO_DIGITS_WIDTH, // s_s
-                ],
-                with_decis,
-            ),
-            Format::Ss => add_decis(
-                vec![
-                    TWO_DIGITS_WIDTH, // s_s
-                ],
-                with_decis,
-            ),
-            Format::S => add_decis(
-                vec![
-                    DIGIT_WIDTH, // s
-                ],
-                with_decis,
-            ),
-        }
-    }
-
     pub fn get_width(&self, format: &Format, with_decis: bool) -> u16 {
-        self.get_horizontal_lengths(format, with_decis).iter().sum()
+        clock_horizontal_lengths(format, with_decis).iter().sum()
     }
 
     pub fn get_height(&self) -> u16 {
         DIGIT_HEIGHT
     }
+}
 
-    /// Checks whether to blink the clock while rendering.
-    /// Its logic is based on a given `count` value.
-    fn should_blink(&self, count_value: &Option<u64>) -> bool {
-        // Example:
-        // if `RANGE_OF_DONE_COUNT` is 4
-        // then for ranges `0..4`, `8..12` etc. it will return `true`
-        count_value
-            .map(|b| (b % (RANGE_OF_DONE_COUNT * 2)) < RANGE_OF_DONE_COUNT)
-            .unwrap_or(false)
+/// Helper to check whether to blink the clock while rendering.
+/// Its logic is based on a given `count` value.
+pub fn should_blink(count_value: Option<u64>) -> bool {
+    // Example:
+    // if `RANGE_OF_DONE_COUNT` is 4
+    // then for ranges `0..4`, `8..12` etc. it will return `true`
+    count_value
+        .map(|b| (b % (RANGE_OF_DONE_COUNT * 2)) < RANGE_OF_DONE_COUNT)
+        .unwrap_or(false)
+}
+
+// Helper to get horizontal lengths of a clock
+// depending on given `Format` and `with_decis` params
+pub fn clock_horizontal_lengths(format: &Format, with_decis: bool) -> Vec<u16> {
+    let add_decis = |mut lengths: Vec<u16>, with_decis: bool| -> Vec<u16> {
+        if with_decis {
+            lengths.extend_from_slice(&[
+                DOT_WIDTH,   // .
+                DIGIT_WIDTH, // ds
+            ])
+        }
+        lengths
+    };
+
+    const LABEL_WIDTH: u16 = DIGIT_LABEL_WIDTH + DIGIT_SPACE_WIDTH;
+
+    match format {
+        Format::YyyyDddHhMmSs => add_decis(
+            vec![
+                FOUR_DIGITS_WIDTH,  // y_y_y_y
+                LABEL_WIDTH,        // _l__
+                THREE_DIGITS_WIDTH, // d_d_d
+                LABEL_WIDTH,        // _l__
+                TWO_DIGITS_WIDTH,   // h_h
+                COLON_WIDTH,        // :
+                TWO_DIGITS_WIDTH,   // m_m
+                COLON_WIDTH,        // :
+                TWO_DIGITS_WIDTH,   // s_s
+            ],
+            with_decis,
+        ),
+        Format::YyyyDdHhMmSs => add_decis(
+            vec![
+                FOUR_DIGITS_WIDTH, // y_y_y_y
+                LABEL_WIDTH,       // _l__
+                TWO_DIGITS_WIDTH,  // d_d
+                LABEL_WIDTH,       // _l__
+                TWO_DIGITS_WIDTH,  // h_h
+                COLON_WIDTH,       // :
+                TWO_DIGITS_WIDTH,  // m_m
+                COLON_WIDTH,       // :
+                TWO_DIGITS_WIDTH,  // s_s
+            ],
+            with_decis,
+        ),
+        Format::YyyyDHhMmSs => add_decis(
+            vec![
+                FOUR_DIGITS_WIDTH, // y_y_y_y
+                LABEL_WIDTH,       // _l__
+                DIGIT_WIDTH,       // d
+                LABEL_WIDTH,       // _l__
+                TWO_DIGITS_WIDTH,  // h_h
+                COLON_WIDTH,       // :
+                TWO_DIGITS_WIDTH,  // m_m
+                COLON_WIDTH,       // :
+                TWO_DIGITS_WIDTH,  // s_s
+            ],
+            with_decis,
+        ),
+        Format::YyyDddHhMmSs => add_decis(
+            vec![
+                THREE_DIGITS_WIDTH, // y_y_y
+                LABEL_WIDTH,        // _l__
+                THREE_DIGITS_WIDTH, // d_d_d
+                LABEL_WIDTH,        // _l__
+                TWO_DIGITS_WIDTH,   // h_h
+                COLON_WIDTH,        // :
+                TWO_DIGITS_WIDTH,   // m_m
+                COLON_WIDTH,        // :
+                TWO_DIGITS_WIDTH,   // s_s
+            ],
+            with_decis,
+        ),
+        Format::YyyDdHhMmSs => add_decis(
+            vec![
+                THREE_DIGITS_WIDTH, // y_y_y
+                LABEL_WIDTH,        // _l__
+                TWO_DIGITS_WIDTH,   // d_d
+                LABEL_WIDTH,        // _l__
+                TWO_DIGITS_WIDTH,   // h_h
+                COLON_WIDTH,        // :
+                TWO_DIGITS_WIDTH,   // m_m
+                COLON_WIDTH,        // :
+                TWO_DIGITS_WIDTH,   // s_s
+            ],
+            with_decis,
+        ),
+        Format::YyyDHhMmSs => add_decis(
+            vec![
+                THREE_DIGITS_WIDTH, // y_y_y
+                LABEL_WIDTH,        // _l__
+                DIGIT_WIDTH,        // d
+                LABEL_WIDTH,        // _l__
+                TWO_DIGITS_WIDTH,   // h_h
+                COLON_WIDTH,        // :
+                TWO_DIGITS_WIDTH,   // m_m
+                COLON_WIDTH,        // :
+                TWO_DIGITS_WIDTH,   // s_s
+            ],
+            with_decis,
+        ),
+        Format::YyDddHhMmSs => add_decis(
+            vec![
+                TWO_DIGITS_WIDTH,   // y_y
+                LABEL_WIDTH,        // _l__
+                THREE_DIGITS_WIDTH, // d_d_d
+                LABEL_WIDTH,        // _l__
+                TWO_DIGITS_WIDTH,   // h_h
+                COLON_WIDTH,        // :
+                TWO_DIGITS_WIDTH,   // m_m
+                COLON_WIDTH,        // :
+                TWO_DIGITS_WIDTH,   // s_s
+            ],
+            with_decis,
+        ),
+        Format::YyDdHhMmSs => add_decis(
+            vec![
+                TWO_DIGITS_WIDTH, // y_y
+                LABEL_WIDTH,      // _l__
+                TWO_DIGITS_WIDTH, // d_d
+                LABEL_WIDTH,      // _l__
+                TWO_DIGITS_WIDTH, // h_h
+                COLON_WIDTH,      // :
+                TWO_DIGITS_WIDTH, // m_m
+                COLON_WIDTH,      // :
+                TWO_DIGITS_WIDTH, // s_s
+            ],
+            with_decis,
+        ),
+        Format::YyDHhMmSs => add_decis(
+            vec![
+                TWO_DIGITS_WIDTH, // y_y
+                LABEL_WIDTH,      // _l__
+                DIGIT_WIDTH,      // d
+                LABEL_WIDTH,      // _l__
+                TWO_DIGITS_WIDTH, // h_h
+                COLON_WIDTH,      // :
+                TWO_DIGITS_WIDTH, // m_m
+                COLON_WIDTH,      // :
+                TWO_DIGITS_WIDTH, // s_s
+            ],
+            with_decis,
+        ),
+        Format::YDddHhMmSs => add_decis(
+            vec![
+                DIGIT_WIDTH,        // Y
+                LABEL_WIDTH,        // _l__
+                THREE_DIGITS_WIDTH, // d_d_d
+                LABEL_WIDTH,        // _l__
+                TWO_DIGITS_WIDTH,   // h_h
+                COLON_WIDTH,        // :
+                TWO_DIGITS_WIDTH,   // m_m
+                COLON_WIDTH,        // :
+                TWO_DIGITS_WIDTH,   // s_s
+            ],
+            with_decis,
+        ),
+        Format::YDdHhMmSs => add_decis(
+            vec![
+                DIGIT_WIDTH,      // Y
+                LABEL_WIDTH,      // _l__
+                TWO_DIGITS_WIDTH, // d_d
+                LABEL_WIDTH,      // _l__
+                TWO_DIGITS_WIDTH, // h_h
+                COLON_WIDTH,      // :
+                TWO_DIGITS_WIDTH, // m_m
+                COLON_WIDTH,      // :
+                TWO_DIGITS_WIDTH, // s_s
+            ],
+            with_decis,
+        ),
+        Format::YDHhMmSs => add_decis(
+            vec![
+                DIGIT_WIDTH,      // Y
+                LABEL_WIDTH,      // _l__
+                DIGIT_WIDTH,      // d
+                LABEL_WIDTH,      // _l__
+                TWO_DIGITS_WIDTH, // h_h
+                COLON_WIDTH,      // :
+                TWO_DIGITS_WIDTH, // m_m
+                COLON_WIDTH,      // :
+                TWO_DIGITS_WIDTH, // s_s
+            ],
+            with_decis,
+        ),
+
+        Format::DddHhMmSs => add_decis(
+            vec![
+                THREE_DIGITS_WIDTH, // d_d_d
+                LABEL_WIDTH,        // _l__
+                TWO_DIGITS_WIDTH,   // h_h
+                COLON_WIDTH,        // :
+                TWO_DIGITS_WIDTH,   // m_m
+                COLON_WIDTH,        // :
+                TWO_DIGITS_WIDTH,   // s_s
+            ],
+            with_decis,
+        ),
+        Format::DdHhMmSs => add_decis(
+            vec![
+                TWO_DIGITS_WIDTH, // d_d
+                LABEL_WIDTH,      // _l__
+                TWO_DIGITS_WIDTH, // h_h
+                COLON_WIDTH,      // :
+                TWO_DIGITS_WIDTH, // m_m
+                COLON_WIDTH,      // :
+                TWO_DIGITS_WIDTH, // s_s
+            ],
+            with_decis,
+        ),
+        Format::DHhMmSs => add_decis(
+            vec![
+                DIGIT_WIDTH,      // D
+                LABEL_WIDTH,      // _l__
+                TWO_DIGITS_WIDTH, // h_h
+                COLON_WIDTH,      // :
+                TWO_DIGITS_WIDTH, // m_m
+                COLON_WIDTH,      // :
+                TWO_DIGITS_WIDTH, // s_s
+            ],
+            with_decis,
+        ),
+        Format::HhMmSs => add_decis(
+            vec![
+                TWO_DIGITS_WIDTH, // h_h
+                COLON_WIDTH,      // :
+                TWO_DIGITS_WIDTH, // m_m
+                COLON_WIDTH,      // :
+                TWO_DIGITS_WIDTH, // s_s
+            ],
+            with_decis,
+        ),
+        Format::HMmSs => add_decis(
+            vec![
+                DIGIT_WIDTH,      // h
+                COLON_WIDTH,      // :
+                TWO_DIGITS_WIDTH, // m_m
+                COLON_WIDTH,      // :
+                TWO_DIGITS_WIDTH, // s_s
+            ],
+            with_decis,
+        ),
+        Format::MmSs => add_decis(
+            vec![
+                TWO_DIGITS_WIDTH, // m_m
+                COLON_WIDTH,      // :
+                TWO_DIGITS_WIDTH, // s_s
+            ],
+            with_decis,
+        ),
+        Format::MSs => add_decis(
+            vec![
+                DIGIT_WIDTH,      // m
+                COLON_WIDTH,      // :
+                TWO_DIGITS_WIDTH, // s_s
+            ],
+            with_decis,
+        ),
+        Format::Ss => add_decis(
+            vec![
+                TWO_DIGITS_WIDTH, // s_s
+            ],
+            with_decis,
+        ),
+        Format::S => add_decis(
+            vec![
+                DIGIT_WIDTH, // s
+            ],
+            with_decis,
+        ),
+    }
+}
+
+// State to render a clock
+pub struct RenderClockState<'a, D: ClockDuration> {
+    pub format: Format,
+    pub editable_time: Option<Time>,
+    pub with_decis: bool,
+    pub symbol: &'a str,
+    pub widths: Vec<u16>,
+    pub duration: D,
+}
+
+// Helper to render a clock
+pub fn render_clock<D: ClockDuration>(area: Rect, buf: &mut Buffer, state: RenderClockState<D>) {
+    let RenderClockState {
+        format,
+        with_decis,
+        symbol,
+        widths,
+        editable_time,
+        duration,
+    } = state;
+
+    let width = widths.iter().sum();
+    let area = area.centered_horizontally(Constraint::Length(width));
+
+    let edit_years = matches!(editable_time, Some(Time::Years));
+    let edit_days = matches!(editable_time, Some(Time::Days));
+    let edit_hours = matches!(editable_time, Some(Time::Hours));
+    let edit_minutes = matches!(editable_time, Some(Time::Minutes));
+    let edit_secs = matches!(editable_time, Some(Time::Seconds));
+    let edit_decis = matches!(editable_time, Some(Time::Decis));
+
+    let render_four_digits = |d1, d2, d3, d4, editable, area, buf: &mut Buffer| {
+        let [a1, a2, a3, a4] = Layout::horizontal(Constraint::from_lengths([
+            DIGIT_WIDTH + DIGIT_SPACE_WIDTH,
+            DIGIT_WIDTH + DIGIT_SPACE_WIDTH,
+            DIGIT_WIDTH + DIGIT_SPACE_WIDTH,
+            DIGIT_WIDTH,
+        ]))
+        .areas(area);
+        Digit::new(d1, editable, symbol).render(a1, buf);
+        Digit::new(d2, editable, symbol).render(a2, buf);
+        Digit::new(d3, editable, symbol).render(a3, buf);
+        Digit::new(d4, editable, symbol).render(a4, buf);
+    };
+
+    let render_three_digits = |d1, d2, d3, editable, area, buf: &mut Buffer| {
+        let [a1, a2, a3] = Layout::horizontal(Constraint::from_lengths([
+            DIGIT_WIDTH + DIGIT_SPACE_WIDTH,
+            DIGIT_WIDTH + DIGIT_SPACE_WIDTH,
+            DIGIT_WIDTH,
+        ]))
+        .areas(area);
+        Digit::new(d1, editable, symbol).render(a1, buf);
+        Digit::new(d2, editable, symbol).render(a2, buf);
+        Digit::new(d3, editable, symbol).render(a3, buf);
+    };
+
+    let render_two_digits = |d1, d2, editable, area, buf: &mut Buffer| {
+        let [a1, a2] = Layout::horizontal(Constraint::from_lengths([
+            DIGIT_WIDTH + DIGIT_SPACE_WIDTH,
+            DIGIT_WIDTH,
+        ]))
+        .areas(area);
+        Digit::new(d1, editable, symbol).render(a1, buf);
+        Digit::new(d2, editable, symbol).render(a2, buf);
+    };
+
+    let render_colon = |area, buf: &mut Buffer| {
+        Colon::new(symbol).render(area, buf);
+    };
+
+    let render_dot = |area, buf: &mut Buffer| {
+        Dot::new(symbol).render(area, buf);
+    };
+
+    let render_yyyy = |area, buf| {
+        render_four_digits(
+            (duration.years() / 1000) % 10,
+            (duration.years() / 100) % 10,
+            (duration.years() / 10) % 10,
+            duration.years() % 10,
+            edit_years,
+            area,
+            buf,
+        );
+    };
+
+    let render_yyy = |area, buf| {
+        render_three_digits(
+            (duration.years() / 100) % 10,
+            (duration.years() / 10) % 10,
+            duration.years() % 10,
+            edit_years,
+            area,
+            buf,
+        );
+    };
+
+    let render_yy = |area, buf| {
+        render_two_digits(
+            (duration.years() / 10) % 10,
+            duration.years() % 10,
+            edit_years,
+            area,
+            buf,
+        );
+    };
+
+    let render_y = |area, buf| {
+        Digit::new(duration.years() % 10, edit_years, symbol).render(area, buf);
+    };
+
+    let render_ddd = |area, buf| {
+        render_three_digits(
+            (duration.days_mod() / 100) % 10,
+            (duration.days_mod() / 10) % 10,
+            duration.days_mod() % 10,
+            edit_days,
+            area,
+            buf,
+        );
+    };
+
+    let render_dd = |area, buf| {
+        render_two_digits(
+            (duration.days_mod() / 10) % 10,
+            duration.days_mod() % 10,
+            edit_days,
+            area,
+            buf,
+        );
+    };
+
+    let render_d = |area, buf| {
+        Digit::new(duration.days_mod() % 10, edit_days, symbol).render(area, buf);
+    };
+
+    let render_hh = |area, buf| {
+        render_two_digits(
+            duration.hours_mod() / 10,
+            duration.hours_mod() % 10,
+            edit_hours,
+            area,
+            buf,
+        );
+    };
+
+    let render_h = |area, buf| {
+        Digit::new(duration.hours_mod() % 10, edit_hours, symbol).render(area, buf);
+    };
+
+    let render_mm = |area, buf| {
+        render_two_digits(
+            duration.minutes_mod() / 10,
+            duration.minutes_mod() % 10,
+            edit_minutes,
+            area,
+            buf,
+        );
+    };
+
+    let render_m = |area, buf| {
+        Digit::new(duration.minutes_mod() % 10, edit_minutes, symbol).render(area, buf);
+    };
+
+    let render_ss = |area, buf| {
+        render_two_digits(
+            duration.seconds_mod() / 10,
+            duration.seconds_mod() % 10,
+            edit_secs,
+            area,
+            buf,
+        );
+    };
+
+    let render_s = |area, buf| {
+        Digit::new(duration.seconds_mod() % 10, edit_secs, symbol).render(area, buf);
+    };
+
+    let render_ds = |area, buf| {
+        Digit::new(duration.decis(), edit_decis, symbol).render(area, buf);
+    };
+
+    let render_label = |l: &str, area, buf: &mut Buffer| {
+        Span::styled(
+            format!(" {l}").to_uppercase(),
+            Style::default().add_modifier(Modifier::BOLD),
+        )
+        .render(area, buf);
+    };
+
+    let render_label_y = |area, buf| {
+        render_label("Y", area, buf);
+    };
+
+    let render_label_d = |area, buf| {
+        render_label("D", area, buf);
+    };
+
+    match format {
+        Format::YyyyDddHhMmSs if with_decis => {
+            let [y_y_y_y, ly, d_d_d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_yyyy(y_y_y_y, buf);
+            render_label_y(ly, buf);
+            render_ddd(d_d_d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+            render_dot(dot, buf);
+            render_ds(ds, buf);
+        }
+        Format::YyyyDddHhMmSs => {
+            let [y_y_y_y, ly, d_d_d, ld, h_h, c_hm, m_m, c_ms, s_s] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_yyyy(y_y_y_y, buf);
+            render_label_y(ly, buf);
+            render_ddd(d_d_d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+        }
+        Format::YyyyDdHhMmSs if with_decis => {
+            let [y_y_y_y, ly, d_d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_yyyy(y_y_y_y, buf);
+            render_label_y(ly, buf);
+            render_dd(d_d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+            render_dot(dot, buf);
+            render_ds(ds, buf);
+        }
+        Format::YyyyDdHhMmSs => {
+            let [y_y_y_y, ly, d_d, ld, h_h, c_hm, m_m, c_ms, s_s] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_yyyy(y_y_y_y, buf);
+            render_label_y(ly, buf);
+            render_dd(d_d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+        }
+        Format::YyyyDHhMmSs if with_decis => {
+            let [y_y_y_y, ly, d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_yyyy(y_y_y_y, buf);
+            render_label_y(ly, buf);
+            render_d(d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+            render_dot(dot, buf);
+            render_ds(ds, buf);
+        }
+        Format::YyyyDHhMmSs => {
+            let [y_y_y_y, ly, d, ld, h_h, c_hm, m_m, c_ms, s_s] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_yyyy(y_y_y_y, buf);
+            render_label_y(ly, buf);
+            render_d(d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+        }
+        Format::YyyDddHhMmSs if with_decis => {
+            let [y_y_y, ly, d_d_d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_yyy(y_y_y, buf);
+            render_label_y(ly, buf);
+            render_ddd(d_d_d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+            render_dot(dot, buf);
+            render_ds(ds, buf);
+        }
+        Format::YyyDddHhMmSs => {
+            let [y_y_y, ly, d_d_d, ld, h_h, c_hm, m_m, c_ms, s_s] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_yyy(y_y_y, buf);
+            render_label_y(ly, buf);
+            render_ddd(d_d_d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+        }
+        Format::YyyDdHhMmSs if with_decis => {
+            let [y_y_y, ly, d_d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_yyy(y_y_y, buf);
+            render_label_y(ly, buf);
+            render_dd(d_d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+            render_dot(dot, buf);
+            render_ds(ds, buf);
+        }
+        Format::YyyDdHhMmSs => {
+            let [y_y_y, ly, d_d, ld, h_h, c_hm, m_m, c_ms, s_s] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_yyy(y_y_y, buf);
+            render_label_y(ly, buf);
+            render_dd(d_d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+        }
+        Format::YyyDHhMmSs if with_decis => {
+            let [y_y_y, ly, d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_yyy(y_y_y, buf);
+            render_label_y(ly, buf);
+            render_d(d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+            render_dot(dot, buf);
+            render_ds(ds, buf);
+        }
+        Format::YyyDHhMmSs => {
+            let [y_y_y, ly, d, ld, h_h, c_hm, m_m, c_ms, s_s] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_yyy(y_y_y, buf);
+            render_label_y(ly, buf);
+            render_d(d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+        }
+        Format::YyDddHhMmSs if with_decis => {
+            let [y_y, ly, d_d_d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_yy(y_y, buf);
+            render_label_y(ly, buf);
+            render_ddd(d_d_d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+            render_dot(dot, buf);
+            render_ds(ds, buf);
+        }
+        Format::YyDddHhMmSs => {
+            let [y_y, ly, d_d_d, ld, h_h, c_hm, m_m, c_ms, s_s] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_yy(y_y, buf);
+            render_label_y(ly, buf);
+            render_ddd(d_d_d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+        }
+        Format::YyDdHhMmSs if with_decis => {
+            let [y_y, ly, d_d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_yy(y_y, buf);
+            render_label_y(ly, buf);
+            render_dd(d_d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+            render_dot(dot, buf);
+            render_ds(ds, buf);
+        }
+        Format::YyDdHhMmSs => {
+            let [y_y, ly, d_d, ld, h_h, c_hm, m_m, c_ms, s_s] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_yy(y_y, buf);
+            render_label_y(ly, buf);
+            render_dd(d_d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+        }
+        Format::YyDHhMmSs if with_decis => {
+            let [y_y, ly, d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_yy(y_y, buf);
+            render_label_y(ly, buf);
+            render_d(d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+            render_dot(dot, buf);
+            render_ds(ds, buf);
+        }
+        Format::YyDHhMmSs => {
+            let [y_y, ly, d, ld, h_h, c_hm, m_m, c_ms, s_s] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_yy(y_y, buf);
+            render_label_y(ly, buf);
+            render_d(d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+        }
+        Format::YDddHhMmSs if with_decis => {
+            let [y, ly, d_d_d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_y(y, buf);
+            render_label_y(ly, buf);
+            render_ddd(d_d_d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+            render_dot(dot, buf);
+            render_ds(ds, buf);
+        }
+        Format::YDddHhMmSs => {
+            let [y, ly, d_d_d, ld, h_h, c_hm, m_m, c_ms, s_s] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_y(y, buf);
+            render_label_y(ly, buf);
+            render_ddd(d_d_d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+        }
+        Format::YDdHhMmSs if with_decis => {
+            let [y, ly, d_d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_y(y, buf);
+            render_label_y(ly, buf);
+            render_dd(d_d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+            render_dot(dot, buf);
+            render_ds(ds, buf);
+        }
+        Format::YDdHhMmSs => {
+            let [y, ly, d_d, ld, h_h, c_hm, m_m, c_ms, s_s] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_y(y, buf);
+            render_label_y(ly, buf);
+            render_dd(d_d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+        }
+        Format::YDHhMmSs if with_decis => {
+            let [y, ly, d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_y(y, buf);
+            render_label_y(ly, buf);
+            render_d(d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+            render_dot(dot, buf);
+            render_ds(ds, buf);
+        }
+        Format::YDHhMmSs => {
+            let [y, ly, d, ld, h_h, c_hm, m_m, c_ms, s_s] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_y(y, buf);
+            render_label_y(ly, buf);
+            render_d(d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+        }
+        Format::DddHhMmSs if with_decis => {
+            let [d_d_d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_ddd(d_d_d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+            render_dot(dot, buf);
+            render_ds(ds, buf);
+        }
+        Format::DddHhMmSs => {
+            let [d_d_d, ld, h_h, c_hm, m_m, c_ms, s_s] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_ddd(d_d_d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+        }
+        Format::DdHhMmSs if with_decis => {
+            let [d_d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_dd(d_d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+            render_dot(dot, buf);
+            render_ds(ds, buf);
+        }
+        Format::DdHhMmSs => {
+            let [d_d, ld, h_h, c_hm, m_m, c_ms, s_s] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_dd(d_d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+        }
+        Format::DHhMmSs if with_decis => {
+            let [d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_d(d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+            render_dot(dot, buf);
+            render_ds(ds, buf);
+        }
+        Format::DHhMmSs => {
+            let [d, ld, h_h, c_hm, m_m, c_ms, s_s] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_d(d, buf);
+            render_label_d(ld, buf);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+        }
+        Format::HhMmSs if with_decis => {
+            let [h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+            render_dot(dot, buf);
+            render_ds(ds, buf);
+        }
+        Format::HhMmSs => {
+            let [h_h, c_hm, m_m, c_ms, s_s] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_hh(h_h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+        }
+        Format::HMmSs if with_decis => {
+            let [h, c_hm, m_m, c_ms, s_s, dot, ds] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_h(h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+            render_dot(dot, buf);
+            render_ds(ds, buf);
+        }
+        Format::HMmSs => {
+            let [h, c_hm, m_m, c_ms, s_s] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_h(h, buf);
+            render_colon(c_hm, buf);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+        }
+        Format::MmSs if with_decis => {
+            let [m_m, c_ms, s_s, dot, ds] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+            render_dot(dot, buf);
+            render_ds(ds, buf);
+        }
+        Format::MmSs => {
+            let [m_m, c_ms, s_s] = Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_mm(m_m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+        }
+        Format::MSs if with_decis => {
+            let [m, c_ms, s_s, dot, ds] =
+                Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_m(m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+            render_dot(dot, buf);
+            render_ds(ds, buf);
+        }
+        Format::MSs => {
+            let [m, c_ms, s_s] = Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_m(m, buf);
+            render_colon(c_ms, buf);
+            render_ss(s_s, buf);
+        }
+        Format::Ss if state.with_decis => {
+            let [s_s, dot, ds] = Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_ss(s_s, buf);
+            render_dot(dot, buf);
+            render_ds(ds, buf);
+        }
+        Format::Ss => {
+            let [s_s] = Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_ss(s_s, buf);
+        }
+        Format::S if with_decis => {
+            let [s, dot, ds] = Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_s(s, buf);
+            render_dot(dot, buf);
+            render_ds(ds, buf);
+        }
+        Format::S => {
+            let [s] = Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
+            render_s(s, buf);
+        }
     }
 }
 
@@ -899,586 +1655,27 @@ where
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         let with_decis = state.with_decis;
         let format = state.format;
-        // to simulate a blink effect, just use an "empty" symbol (string)
-        // to "empty" all digits and to have an "empty" render area
-        let symbol = if self.blink && self.should_blink(&state.done_count) {
+        let widths = clock_horizontal_lengths(&format, with_decis);
+
+        // To simulate a blink effect, just use an "empty" symbol (string)
+        // It's "empty" all digits and creates an "empty" render area
+        let symbol = if self.blink && should_blink(state.done_count) {
             " "
         } else {
             self.style.get_digit_symbol()
         };
-        let widths = self.get_horizontal_lengths(&format, with_decis);
-        let area = center_horizontal(
-            area,
-            Constraint::Length(self.get_width(&format, with_decis)),
-        );
-        let edit_years = matches!(state.mode, Mode::Editable(Time::Years, _));
-        let edit_days = matches!(state.mode, Mode::Editable(Time::Days, _));
-        let edit_hours = matches!(state.mode, Mode::Editable(Time::Hours, _));
-        let edit_minutes = matches!(state.mode, Mode::Editable(Time::Minutes, _));
-        let edit_secs = matches!(state.mode, Mode::Editable(Time::Seconds, _));
-        let edit_decis = matches!(state.mode, Mode::Editable(Time::Decis, _));
 
-        let render_three_digits = |d1, d2, d3, editable, area, buf: &mut Buffer| {
-            let [a1, a2, a3] = Layout::horizontal(Constraint::from_lengths([
-                DIGIT_WIDTH + DIGIT_SPACE_WIDTH,
-                DIGIT_WIDTH + DIGIT_SPACE_WIDTH,
-                DIGIT_WIDTH,
-            ]))
-            .areas(area);
-            Digit::new(d1, editable, symbol).render(a1, buf);
-            Digit::new(d2, editable, symbol).render(a2, buf);
-            Digit::new(d3, editable, symbol).render(a3, buf);
+        let render_state = RenderClockState {
+            with_decis,
+            duration: state.current_value,
+            editable_time: match state.get_mode() {
+                Mode::Editable(time, _) => Some(*time),
+                _ => None,
+            },
+            format,
+            symbol,
+            widths,
         };
-
-        let render_two_digits = |d1, d2, editable, area, buf: &mut Buffer| {
-            let [a1, a2] = Layout::horizontal(Constraint::from_lengths([
-                DIGIT_WIDTH + DIGIT_SPACE_WIDTH,
-                DIGIT_WIDTH,
-            ]))
-            .areas(area);
-            Digit::new(d1, editable, symbol).render(a1, buf);
-            Digit::new(d2, editable, symbol).render(a2, buf);
-        };
-
-        let render_colon = |area, buf: &mut Buffer| {
-            Colon::new(symbol).render(area, buf);
-        };
-
-        let render_dot = |area, buf: &mut Buffer| {
-            Dot::new(symbol).render(area, buf);
-        };
-
-        let render_yyy = |area, buf| {
-            render_three_digits(
-                (state.current_value.years() / 100) % 10,
-                (state.current_value.years() / 10) % 10,
-                state.current_value.years() % 10,
-                edit_years,
-                area,
-                buf,
-            );
-        };
-
-        let render_yy = |area, buf| {
-            render_two_digits(
-                (state.current_value.years() / 10) % 10,
-                state.current_value.years() % 10,
-                edit_years,
-                area,
-                buf,
-            );
-        };
-
-        let render_y = |area, buf| {
-            Digit::new(state.current_value.years() % 10, edit_years, symbol).render(area, buf);
-        };
-
-        let render_ddd = |area, buf| {
-            render_three_digits(
-                (state.current_value.days_mod() / 100) % 10,
-                (state.current_value.days_mod() / 10) % 10,
-                state.current_value.days_mod() % 10,
-                edit_days,
-                area,
-                buf,
-            );
-        };
-
-        let render_dd = |area, buf| {
-            render_two_digits(
-                (state.current_value.days_mod() / 10) % 10,
-                state.current_value.days_mod() % 10,
-                edit_days,
-                area,
-                buf,
-            );
-        };
-
-        let render_d = |area, buf| {
-            Digit::new(state.current_value.days_mod() % 10, edit_days, symbol).render(area, buf);
-        };
-
-        let render_hh = |area, buf| {
-            render_two_digits(
-                state.current_value.hours_mod() / 10,
-                state.current_value.hours_mod() % 10,
-                edit_hours,
-                area,
-                buf,
-            );
-        };
-
-        let render_h = |area, buf| {
-            Digit::new(state.current_value.hours_mod() % 10, edit_hours, symbol).render(area, buf);
-        };
-
-        let render_mm = |area, buf| {
-            render_two_digits(
-                state.current_value.minutes_mod() / 10,
-                state.current_value.minutes_mod() % 10,
-                edit_minutes,
-                area,
-                buf,
-            );
-        };
-
-        let render_m = |area, buf| {
-            Digit::new(state.current_value.minutes_mod() % 10, edit_minutes, symbol)
-                .render(area, buf);
-        };
-
-        let render_ss = |area, buf| {
-            render_two_digits(
-                state.current_value.seconds_mod() / 10,
-                state.current_value.seconds_mod() % 10,
-                edit_secs,
-                area,
-                buf,
-            );
-        };
-
-        let render_s = |area, buf| {
-            Digit::new(state.current_value.seconds_mod() % 10, edit_secs, symbol).render(area, buf);
-        };
-
-        let render_ds = |area, buf| {
-            Digit::new(state.current_value.decis(), edit_decis, symbol).render(area, buf);
-        };
-
-        let render_label = |l: &str, area, buf: &mut Buffer| {
-            Span::styled(
-                format!(" {l}").to_uppercase(),
-                Style::default().add_modifier(Modifier::BOLD),
-            )
-            .render(area, buf);
-        };
-
-        let render_label_y = |area, buf| {
-            render_label("Y", area, buf);
-        };
-
-        let render_label_d = |area, buf| {
-            render_label("D", area, buf);
-        };
-
-        match format {
-            Format::YyyDddHhMmSs if with_decis => {
-                let [y_y_y, ly, d_d_d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_yyy(y_y_y, buf);
-                render_label_y(ly, buf);
-                render_ddd(d_d_d, buf);
-                render_label_d(ld, buf);
-                render_hh(h_h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-                render_dot(dot, buf);
-                render_ds(ds, buf);
-            }
-            Format::YyyDddHhMmSs => {
-                let [y_y_y, ly, d_d_d, ld, h_h, c_hm, m_m, c_ms, s_s] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_yyy(y_y_y, buf);
-                render_label_y(ly, buf);
-                render_ddd(d_d_d, buf);
-                render_label_d(ld, buf);
-                render_hh(h_h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-            }
-            Format::YyyDdHhMmSs if with_decis => {
-                let [y_y_y, ly, d_d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_yyy(y_y_y, buf);
-                render_label_y(ly, buf);
-                render_dd(d_d, buf);
-                render_label_d(ld, buf);
-                render_hh(h_h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-                render_dot(dot, buf);
-                render_ds(ds, buf);
-            }
-            Format::YyyDdHhMmSs => {
-                let [y_y_y, ly, d_d, ld, h_h, c_hm, m_m, c_ms, s_s] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_yyy(y_y_y, buf);
-                render_label_y(ly, buf);
-                render_dd(d_d, buf);
-                render_label_d(ld, buf);
-                render_hh(h_h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-            }
-            Format::YyyDHhMmSs if with_decis => {
-                let [y_y_y, ly, d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_yyy(y_y_y, buf);
-                render_label_y(ly, buf);
-                render_d(d, buf);
-                render_label_d(ld, buf);
-                render_hh(h_h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-                render_dot(dot, buf);
-                render_ds(ds, buf);
-            }
-            Format::YyyDHhMmSs => {
-                let [y_y_y, ly, d, ld, h_h, c_hm, m_m, c_ms, s_s] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_yyy(y_y_y, buf);
-                render_label_y(ly, buf);
-                render_d(d, buf);
-                render_label_d(ld, buf);
-                render_hh(h_h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-            }
-            Format::YyDddHhMmSs if with_decis => {
-                let [y_y, ly, d_d_d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_yy(y_y, buf);
-                render_label_y(ly, buf);
-                render_ddd(d_d_d, buf);
-                render_label_d(ld, buf);
-                render_hh(h_h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-                render_dot(dot, buf);
-                render_ds(ds, buf);
-            }
-            Format::YyDddHhMmSs => {
-                let [y_y, ly, d_d_d, ld, h_h, c_hm, m_m, c_ms, s_s] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_yy(y_y, buf);
-                render_label_y(ly, buf);
-                render_ddd(d_d_d, buf);
-                render_label_d(ld, buf);
-                render_hh(h_h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-            }
-            Format::YyDdHhMmSs if with_decis => {
-                let [y_y, ly, d_d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_yy(y_y, buf);
-                render_label_y(ly, buf);
-                render_dd(d_d, buf);
-                render_label_d(ld, buf);
-                render_hh(h_h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-                render_dot(dot, buf);
-                render_ds(ds, buf);
-            }
-            Format::YyDdHhMmSs => {
-                let [y_y, ly, d_d, ld, h_h, c_hm, m_m, c_ms, s_s] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_yy(y_y, buf);
-                render_label_y(ly, buf);
-                render_dd(d_d, buf);
-                render_label_d(ld, buf);
-                render_hh(h_h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-            }
-            Format::YyDHhMmSs if with_decis => {
-                let [y_y, ly, d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_yy(y_y, buf);
-                render_label_y(ly, buf);
-                render_d(d, buf);
-                render_label_d(ld, buf);
-                render_hh(h_h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-                render_dot(dot, buf);
-                render_ds(ds, buf);
-            }
-            Format::YyDHhMmSs => {
-                let [y_y, ly, d, ld, h_h, c_hm, m_m, c_ms, s_s] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_yy(y_y, buf);
-                render_label_y(ly, buf);
-                render_d(d, buf);
-                render_label_d(ld, buf);
-                render_hh(h_h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-            }
-            Format::YDddHhMmSs if with_decis => {
-                let [y, ly, d_d_d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_y(y, buf);
-                render_label_y(ly, buf);
-                render_ddd(d_d_d, buf);
-                render_label_d(ld, buf);
-                render_hh(h_h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-                render_dot(dot, buf);
-                render_ds(ds, buf);
-            }
-            Format::YDddHhMmSs => {
-                let [y, ly, d_d_d, ld, h_h, c_hm, m_m, c_ms, s_s] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_y(y, buf);
-                render_label_y(ly, buf);
-                render_ddd(d_d_d, buf);
-                render_label_d(ld, buf);
-                render_hh(h_h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-            }
-            Format::YDdHhMmSs if with_decis => {
-                let [y, ly, d_d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_y(y, buf);
-                render_label_y(ly, buf);
-                render_dd(d_d, buf);
-                render_label_d(ld, buf);
-                render_hh(h_h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-                render_dot(dot, buf);
-                render_ds(ds, buf);
-            }
-            Format::YDdHhMmSs => {
-                let [y, ly, d_d, ld, h_h, c_hm, m_m, c_ms, s_s] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_y(y, buf);
-                render_label_y(ly, buf);
-                render_dd(d_d, buf);
-                render_label_d(ld, buf);
-                render_hh(h_h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-            }
-            Format::YDHhMmSs if with_decis => {
-                let [y, ly, d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_y(y, buf);
-                render_label_y(ly, buf);
-                render_d(d, buf);
-                render_label_d(ld, buf);
-                render_hh(h_h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-                render_dot(dot, buf);
-                render_ds(ds, buf);
-            }
-            Format::YDHhMmSs => {
-                let [y, ly, d, ld, h_h, c_hm, m_m, c_ms, s_s] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_y(y, buf);
-                render_label_y(ly, buf);
-                render_d(d, buf);
-                render_label_d(ld, buf);
-                render_hh(h_h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-            }
-            Format::DddHhMmSs if with_decis => {
-                let [d_d_d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_ddd(d_d_d, buf);
-                render_label_d(ld, buf);
-                render_hh(h_h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-                render_dot(dot, buf);
-                render_ds(ds, buf);
-            }
-            Format::DddHhMmSs => {
-                let [d_d_d, ld, h_h, c_hm, m_m, c_ms, s_s] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_ddd(d_d_d, buf);
-                render_label_d(ld, buf);
-                render_hh(h_h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-            }
-            Format::DdHhMmSs if with_decis => {
-                let [d_d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_dd(d_d, buf);
-                render_label_d(ld, buf);
-                render_hh(h_h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-                render_dot(dot, buf);
-                render_ds(ds, buf);
-            }
-            Format::DdHhMmSs => {
-                let [d_d, ld, h_h, c_hm, m_m, c_ms, s_s] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_dd(d_d, buf);
-                render_label_d(ld, buf);
-                render_hh(h_h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-            }
-            Format::DHhMmSs if with_decis => {
-                let [d, ld, h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_d(d, buf);
-                render_label_d(ld, buf);
-                render_hh(h_h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-                render_dot(dot, buf);
-                render_ds(ds, buf);
-            }
-            Format::DHhMmSs => {
-                let [d, ld, h_h, c_hm, m_m, c_ms, s_s] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_d(d, buf);
-                render_label_d(ld, buf);
-                render_hh(h_h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-            }
-            Format::HhMmSs if with_decis => {
-                let [h_h, c_hm, m_m, c_ms, s_s, dot, ds] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_hh(h_h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-                render_dot(dot, buf);
-                render_ds(ds, buf);
-            }
-            Format::HhMmSs => {
-                let [h_h, c_hm, m_m, c_ms, s_s] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_hh(h_h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-            }
-            Format::HMmSs if with_decis => {
-                let [h, c_hm, m_m, c_ms, s_s, dot, ds] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_h(h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-                render_dot(dot, buf);
-                render_ds(ds, buf);
-            }
-            Format::HMmSs => {
-                let [h, c_hm, m_m, c_ms, s_s] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_h(h, buf);
-                render_colon(c_hm, buf);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-            }
-            Format::MmSs if with_decis => {
-                let [m_m, c_ms, s_s, dot, ds] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-                render_dot(dot, buf);
-                render_ds(ds, buf);
-            }
-            Format::MmSs => {
-                let [m_m, c_ms, s_s] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_mm(m_m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-            }
-            Format::MSs if with_decis => {
-                let [m, c_ms, s_s, dot, ds] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_m(m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-                render_dot(dot, buf);
-                render_ds(ds, buf);
-            }
-            Format::MSs => {
-                let [m, c_ms, s_s] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_m(m, buf);
-                render_colon(c_ms, buf);
-                render_ss(s_s, buf);
-            }
-            Format::Ss if state.with_decis => {
-                let [s_s, dot, ds] =
-                    Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_ss(s_s, buf);
-                render_dot(dot, buf);
-                render_ds(ds, buf);
-            }
-            Format::Ss => {
-                let [s_s] = Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_ss(s_s, buf);
-            }
-            Format::S if with_decis => {
-                let [s, dot, ds] = Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_s(s, buf);
-                render_dot(dot, buf);
-                render_ds(ds, buf);
-            }
-            Format::S => {
-                let [s] = Layout::horizontal(Constraint::from_lengths(widths)).areas(area);
-                render_s(s, buf);
-            }
-        }
+        render_clock(area, buf, render_state);
     }
 }

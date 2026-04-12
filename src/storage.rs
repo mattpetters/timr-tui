@@ -1,5 +1,6 @@
 use crate::{
     common::{AppTimeFormat, Content, Style, Toggle},
+    event::Event,
     widgets::pomodoro::Mode as PomodoroMode,
 };
 use color_eyre::eyre::Result;
@@ -34,6 +35,8 @@ pub struct PomodoroRecord {
 pub struct AppStorage {
     pub content: Content,
     pub show_menu: bool,
+    #[serde(default)]
+    pub vim: Toggle,
     pub notification: Toggle,
     pub blink: Toggle,
     #[serde(deserialize_with = "deserialize_app_time_format")]
@@ -54,6 +57,8 @@ pub struct AppStorage {
     pub elapsed_value_countdown: Duration,
     // timer
     pub current_value_timer: Duration,
+    // event
+    pub event: Event,
     // footer
     pub footer_app_time: Toggle,
     // pomodoro label and history
@@ -70,6 +75,7 @@ impl Default for AppStorage {
         AppStorage {
             content: Content::default(),
             show_menu: true,
+            vim: Toggle::Off,
             notification: Toggle::Off,
             blink: Toggle::Off,
             app_time_format: AppTimeFormat::default(),
@@ -89,6 +95,8 @@ impl Default for AppStorage {
             elapsed_value_countdown: Duration::ZERO,
             // timer
             current_value_timer: Duration::ZERO,
+            // event
+            event: Event::default(),
             // footer
             footer_app_time: Toggle::Off,
             // pomodoro label and history

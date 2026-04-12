@@ -1,17 +1,17 @@
-use crossterm::event::{Event as CrosstermEvent, EventStream, KeyEvent, KeyEventKind};
+use crossterm::event::{Event as CrosstermEvent, EventStream, KeyEventKind};
 use futures::{Stream, StreamExt};
+use ratatui::layout::Position;
 use std::{pin::Pin, time::Duration};
 use tokio::sync::mpsc;
 use tokio::time::interval;
 use tokio_stream::{StreamMap, wrappers::IntervalStream};
 
 use crate::common::ClockTypeId;
-use crate::constants::{FPS_VALUE_MS, TICK_VALUE_MS};
+use crate::constants::TICK_VALUE_MS;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 enum StreamKey {
     Ticks,
-    Render,
     Crossterm,
 }
 
@@ -19,14 +19,13 @@ enum StreamKey {
 pub enum TuiEvent {
     Error,
     Tick,
-    Render,
-    Key(KeyEvent),
-    Resize,
+    Crossterm(CrosstermEvent),
 }
 
 #[derive(Clone, Debug)]
 pub enum AppEvent {
     ClockDone(ClockTypeId, String),
+    SetCursor(Option<Position>),
 }
 
 pub type AppEventTx = mpsc::UnboundedSender<AppEvent>;
@@ -42,7 +41,6 @@ impl Default for Events {
         Self {
             streams: StreamMap::from_iter([
                 (StreamKey::Ticks, tick_stream()),
-                (StreamKey::Render, render_stream()),
                 (StreamKey::Crossterm, crossterm_stream()),
             ]),
             app_channel: mpsc::unbounded_channel(),
@@ -79,24 +77,18 @@ fn tick_stream() -> Pin<Box<dyn Stream<Item = TuiEvent>>> {
     Box::pin(IntervalStream::new(tick_interval).map(|_| TuiEvent::Tick))
 }
 
-fn render_stream() -> Pin<Box<dyn Stream<Item = TuiEvent>>> {
-    let render_interval = interval(Duration::from_millis(FPS_VALUE_MS));
-    Box::pin(IntervalStream::new(render_interval).map(|_| TuiEvent::Render))
-}
-
 fn crossterm_stream() -> Pin<Box<dyn Stream<Item = TuiEvent>>> {
     Box::pin(
         EventStream::new()
             .fuse()
             // we are not interested in all events
-            .filter_map(|event| async move {
-                match event {
-                    Ok(CrosstermEvent::Key(key)) if key.kind == KeyEventKind::Press => {
-                        Some(TuiEvent::Key(key))
-                    }
-                    Ok(CrosstermEvent::Resize(_, _)) => Some(TuiEvent::Resize),
+            .filter_map(|result| async move {
+                match result {
+                    // filter `KeyEventKind::Press` out to ignore all the other `CrosstermEvent::Key` events
+                    Ok(CrosstermEvent::Key(key)) => (key.kind == KeyEventKind::Press)
+                        .then_some(TuiEvent::Crossterm(CrosstermEvent::Key(key))),
+                    Ok(other) => Some(TuiEvent::Crossterm(other)),
                     Err(_) => Some(TuiEvent::Error),
-                    _ => None,
                 }
             }),
     )

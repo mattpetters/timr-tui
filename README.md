@@ -1,13 +1,13 @@
 # timr-tui
 
-TUI to organize your time: Pomodoro, Countdown, Timer.
+[![crate.io](https://img.shields.io/crates/v/timr-tui)](https://crates.io/crates/timr-tui) [![CI](https://img.shields.io/github/actions/workflow/status/sectore/timr-tui/ci.yml)](https://github.com/sectore/timr-tui/actions/workflows/ci.yml) [![License](https://img.shields.io/crates/l/timr-tui)](./LICENSE) [![Built With Ratatui](https://img.shields.io/badge/Built_With-Ratatui-000?logo=ratatui&logoColor=fff&labelColor=000&color=fff)](https://ratatui.rs/)
 
-- `[t]imer` Check the time on anything you are you doing.
-- `[c]ountdown` Use it for your workout, yoga session, meditation, handstand or whatever.
-- `[p]omodoro` Organize your working time to be focused all the time by following the [Pomodoro Technique](https://en.wikipedia.org/wiki/Pomodoro_Technique).
+TUI to organize your time: Pomodoro, Countdown, Timer, Event.
 
-Built with [Ratatui](https://ratatui.rs/) / [Rust 🦀](https://www.rust-lang.org/).
-
+- `[1] countdown` Use it for your workout, yoga/breathing sessions, meditation, handstand or whatever.
+- `[2] timer` Check the time on anything you are doing.
+- `[3] pomodoro` Organize your working time to be focused all the time by following the [Pomodoro Technique](https://en.wikipedia.org/wiki/Pomodoro_Technique).
+- `[4] event` Count the time for any event in the future or past.
 
 # Table of Contents
 
@@ -36,35 +36,40 @@ _(theme depends on your terminal preferences)_
   <img alt="pomodoro" src="demo/timer.gif" />
 </a>
 
-## Countdown
+## Countdown (_incl. [Mission Elapsed Time](https://en.wikipedia.org/wiki/Mission_Elapsed_Time)_)
 
 <a href="demo/countdown.gif">
   <img alt="countdown" src="demo/countdown.gif" />
 </a>
 
-## Countdown: Mission Elapsed Time ([MET](https://en.wikipedia.org/wiki/Mission_Elapsed_Time))
+## Event (_past/future_)
 
-<a href="demo/countdown-met.gif">
-  <img alt="menu" src="demo/countdown-met.gif" />
+<a href="demo/event.gif">
+  <img alt="event" src="demo/event.gif" />
 </a>
-
 
 ## Local time
 
 <a href="demo/local-time.gif">
-  <img alt="menu" src="demo/local-time.gif" />
+  <img alt="local time" src="demo/local-time.gif" />
 </a>
 
-## Local time (footer)
+## Local time (_footer_)
 
 <a href="demo/local-time-footer.gif">
-  <img alt="menu" src="demo/local-time-footer.gif" />
+  <img alt="local time at footer" src="demo/local-time-footer.gif" />
 </a>
 
 ## Toggle deciseconds
 
 <a href="demo/decis.gif">
   <img alt="deciseconds" src="demo/decis.gif" />
+</a>
+
+## Maximum (_`9999y`_ _`364d`_ _`23:59:59.9`_)
+
+<a href="demo/timer-max.png">
+  <img alt="maximum" src="demo/timer-max.png" />
 </a>
 
 ## Change style
@@ -87,34 +92,21 @@ timr-tui --help
 Usage: timr-tui [OPTIONS]
 
 Options:
-  -c, --countdown <COUNTDOWN>
-          Countdown time to start from. Formats: 'Yy Dd hh:mm:ss', 'Dd hh:mm:ss', 'Yy mm:ss', 'Dd mm:ss', 'Yy ss', 'Dd ss', 'hh:mm:ss', 'mm:ss', 'ss'. Examples: '1y 5d 10:30:00', '2d 4:00', '1d 10', '5:03'.
-      --countdown-target <COUNTDOWN_TARGET>
-          Countdown targeting a specific time in the future or past. Formats: 'yyyy-mm-dd hh:mm:ss', 'yyyy-mm-dd hh:mm', 'hh:mm:ss', 'hh:mm', 'mm' [aliases: --ct]
-  -w, --work <WORK>
-          Work time to count down from. Formats: 'ss', 'mm:ss', 'hh:mm:ss'
-  -p, --pause <PAUSE>
-          Pause time to count down from. Formats: 'ss', 'mm:ss', 'hh:mm:ss'
-  -d, --decis
-          Show deciseconds.
-  -m, --mode <MODE>
-          Mode to start with. [possible values: countdown, timer, pomodoro, localtime]
-  -s, --style <STYLE>
-          Style to display time with. [possible values: full, light, medium, dark, thick, cross, braille]
-      --menu
-          Open menu.
-  -r, --reset
-          Reset stored values to defaults.
-  -n, --notification <NOTIFICATION>
-          Toggle desktop notifications. Experimental. [possible values: on, off]
-      --blink <BLINK>
-          Toggle blink mode to animate a clock when it reaches its finished mode. [possible values: on, off]
-      --log [<LOG>]
-          Directory for log file. If not set, standard application log directory is used (check README for details).
-  -h, --help
-          Print help
-  -V, --version
-          Print version
+  -c, --countdown <COUNTDOWN>        Countdown time to start from. Formats: 'Yy Dd hh:mm:ss', 'Dd hh:mm:ss', 'Yy mm:ss', 'Dd mm:ss', 'Yy ss', 'Dd ss', 'hh:mm:ss', 'mm:ss', 'ss'. Examples: '1y 5d 10:30:00', '2d 4:00', '1d 10', '5:03'.
+  -w, --work <WORK>                  Work time to count down from. Formats: 'ss', 'mm:ss', 'hh:mm:ss'
+  -p, --pause <PAUSE>                Pause time to count down from. Formats: 'ss', 'mm:ss', 'hh:mm:ss'
+  -e, --event <EVENT>                Event date time and title (optional). Format: 'YYYY-MM-DD HH:MM:SS' or 'time=YYYY-MM-DD HH:MM:SS[,title=...]'. Examples: '2025-10-10 14:30:00' or 'time=2025-10-10 14:30:00,title=My Event'.
+  -d, --decis                        Show deciseconds.
+  -m, --mode <MODE>                  Mode to start with. [possible values: countdown, timer, pomodoro, event, localtime]
+  -s, --style <STYLE>                Style to display time with. [possible values: full, light, medium, dark, thick, cross, braille]
+      --menu                         Open menu.
+  -v, --vim <VIM>                    Enable/disable Vim motions. [possible values: on, off]
+  -r, --reset                        Reset stored values to defaults.
+  -n, --notification <NOTIFICATION>  Enable/disable desktop notifications. Experimental. [possible values: on, off]
+      --blink <BLINK>                Enable/disable blink mode to animate a clock when it reaches its finished mode. [possible values: on, off]
+      --log [<LOG>]                  Directory for log file. If not set, standard application log directory is used (check README for details).
+  -h, --help                         Print help
+  -V, --version                      Print version
 ```
 
 Extra option (if `--features sound` is enabled by local build only):
@@ -125,64 +117,85 @@ Extra option (if `--features sound` is enabled by local build only):
 
 # Keybindings
 
+Note: To enable Vim motions key binding, run with `--vim=on` once. It will be stored as part of settings, so only running once is needed. To disable, run `--vim=off`.
+
 ## Menu
 
-| Key | Description |
-| --- | --- |
-| <kbd>↑</kbd> / <kbd>↓</kbd> or <kbd>m</kbd> | Toggle menu |
+| Key          | Description |
+| ------------ | ----------- |
+| <kbd>m</kbd> | Toggle menu |
 
 ## Screens
 
-| Key | Description |
-| --- | --- |
-| <kbd>p</kbd> | Pomodoro |
-| <kbd>c</kbd> | Countdown |
-| <kbd>t</kbd> | Timer |
-| <kbd>l</kbd> | Local Time |
+| Key          | Description                     |
+| ------------ | ------------------------------- |
+| <kbd>1</kbd> | Pomodoro                        |
+| <kbd>2</kbd> | Countdown                       |
+| <kbd>3</kbd> | Timer                           |
+| <kbd>4</kbd> | Event                           |
+| <kbd>0</kbd> | Local Time                      |
+| <kbd>→</kbd> | next screen                     |
+| <kbd>←</kbd> | previous screen                 |
+| <kbd>l</kbd> | next screen _(Vim motions)_     |
+| <kbd>h</kbd> | previous screen _(Vim motions)_ |
 
 ## Controls
 
-| Key | Description |
-| --- | --- |
-| <kbd>s</kbd> | start |
-| <kbd>r</kbd> | reset |
-| <kbd>e</kbd> | enter edit mode |
-| <kbd>q</kbd> | quit |
+| Key              | Description     |
+| ---------------- | --------------- |
+| <kbd>space</kbd> | start/stop      |
+| <kbd>r</kbd>     | reset           |
+| <kbd>e</kbd>     | enter edit mode |
+| <kbd>q</kbd>     | quit            |
 
 **In `edit` mode only:**
 
-| Key | Description |
-| --- | --- |
-| <kbd>s</kbd> | save changes |
-| <kbd>Esc</kbd> | skip changes |
-| <kbd>←</kbd> or <kbd>→</kbd> | change selection |
-| <kbd>↑</kbd> | edit to go up |
-| <kbd>ctrl+↑</kbd> | edit to go up 10x |
-| <kbd>↓</kbd> | edit to go down |
-| <kbd>ctrl+↓</kbd> | edit to go down 10x |
+| Key                          | Description                         |
+| ---------------------------- | ----------------------------------- |
+| <kbd>s</kbd>                 | save changes                        |
+| <kbd>esc</kbd>               | skip changes                        |
+| <kbd>←</kbd> or <kbd>→</kbd> | change selection                    |
+| <kbd>h</kbd> or <kbd>l</kbd> | change selection _(Vim motions)_    |
+| <kbd>↑</kbd>                 | edit to go up                       |
+| <kbd>k</kbd>                 | edit to go up _(Vim motions)_       |
+| <kbd>ctrl+↑</kbd>            | edit to go up 10x                   |
+| <kbd>ctrl+k</kbd>            | edit to go up 10x _(Vim motions)_   |
+| <kbd>↓</kbd>                 | edit to go down                     |
+| <kbd>j</kbd>                 | edit to go down _(Vim motions)_     |
+| <kbd>ctrl+↓</kbd>            | edit to go down 10x                 |
+| <kbd>ctrl+j</kbd>            | edit to go down 10x _(Vim motions)_ |
+
+**In `Event` `edit` mode only:**
+
+| Key              | Description  |
+| ---------------- | ------------ |
+| <kbd>enter</kbd> | save changes |
+| <kbd>esc</kbd>   | skip changes |
+| <kbd>tab</kbd>   | switch input |
 
 **In `Pomodoro` screen only:**
 
-| Key | Description |
-| --- | --- |
-| <kbd>←</kbd> or <kbd>→</kbd> | switch work/pause |
-| <kbd>ctrl+r</kbd> | reset round |
-| <kbd>ctrl+s</kbd> | save initial value |
+| Key                                    | Description                       |
+| -------------------------------------- | --------------------------------- |
+| <kbd>ctrl+←</kbd> or <kbd>ctrl+→</kbd> | switch work/pause                 |
+| <kbd>ctrl+h</kbd> or <kbd>ctrl+l</kbd> | switch work/pause _(Vim motions)_ |
+| <kbd>ctrl+r</kbd>                      | reset round                       |
+| <kbd>ctrl+s</kbd>                      | save initial value                |
 
 **In `Countdown` screen only:**
 
-| Key | Description |
-| --- | --- |
+| Key               | Description        |
+| ----------------- | ------------------ |
 | <kbd>ctrl+e</kbd> | edit by local time |
 | <kbd>ctrl+s</kbd> | save initial value |
 
 ## Appearance
 
-| Key | Description |
-| --- | --- |
-| <kbd>,</kbd> | toggle styles |
+| Key          | Description        |
+| ------------ | ------------------ |
+| <kbd>,</kbd> | toggle styles      |
 | <kbd>.</kbd> | toggle deciseconds |
-| <kbd>:</kbd> | toggle local time |
+| <kbd>:</kbd> | toggle local time  |
 
 # Installation
 
@@ -208,6 +221,47 @@ Install [from the AUR](https://aur.archlinux.org/packages/timr/):
 paru -S timr
 ```
 
+## Nix
+
+_Note:_ Currently `timr-tui` is [available on the `unstable` channel](https://search.nixos.org/packages?channel=unstable&query=timr-tui) only.
+
+### Command line
+
+```sh
+# default (w/o sound)
+nix-env -iA nixpkgs.timr-tui
+# or w/ sound enabled
+nix-env -iA nixpkgs.timr-tui --arg timr-tui '(timr-tui.override { enableSound = true; })'
+```
+
+### Configuration
+
+```nix
+# default (w/o sound)
+environment.systemPackages = with pkgs; [
+  timr-tui
+];
+# or w/ sound enabled
+environment.systemPackages = with pkgs; [
+  (timr-tui.override { enableSound = true; })
+];
+```
+
+### Home Manager
+
+```nix
+# default (w/o sound)
+home.packages = with pkgs; [
+  timr-tui
+];
+# or w/ sound enabled
+home.packages = with pkgs; [
+  (timr-tui.override { enableSound = true; })
+];
+```
+
+Source at `nixpkgs`: <https://github.com/NixOS/nixpkgs/blob/nixos-unstable/pkgs/by-name/ti/timr-tui/package.nix>
+
 ## Release binaries
 
 Pre-built artifacts are available to download from [latest GitHub release](https://github.com/sectore/timr-tui/releases).
@@ -227,6 +281,7 @@ If you have [`direnv`](https://direnv.net) installed, run `direnv allow` once to
 - [`Rust`](https://www.rust-lang.org/learn/get-started)
 - [`Clippy`](https://github.com/rust-lang/rust-clippy)
 - [`rustfmt`](https://github.com/rust-lang/rustfmt)
+- [`dprint`](https://dprint.dev)
 - [`just`](https://just.systems)
 
 ### Commands
@@ -245,6 +300,7 @@ Available recipes:
     demo-countdown           # build demo: countdown [alias: dc]
     demo-countdown-met       # build demo: countdown + met [alias: dcm]
     demo-decis               # build demo: deciseconds [alias: dd]
+    demo-event               # build demo: event [alias: de]
     demo-local-time          # build demo: local time [alias: dlt]
     demo-local-time-footer   # build demo: local time (footer) [alias: dltf]
     demo-menu                # build demo: menu [alias: dm]
@@ -289,7 +345,7 @@ nix build .#windows
 cargo test
 ```
 
-# Misc.
+# Misc
 
 ## Persistant app state
 
