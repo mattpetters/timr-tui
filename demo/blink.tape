@@ -4,8 +4,8 @@ Output demo/blink.gif
 Set Theme "nord-light"
 
 Set FontSize 14
-Set Width 800
-Set Height 400
+Set Width 1000
+Set Height 500
 Set Padding 0
 Set Margin 1
 
@@ -17,7 +17,6 @@ Type "cargo run -- -r -m countdown -d -c 1 --blink=on"
 Enter
 Sleep 0.2
 Type "m"
-Type ":::"
 Show
-Type "s"
+Type " "
 Sleep 4

@@ -1,5 +1,78 @@
 # Changelog
 
+## v1.8.0 - 2026-03-23
+
+### Features
+
+- (keys) Support Vim motions [#163](https://github.com/sectore/timr-tui/issues/163)
+
+### Breaking change
+
+- (keys)! Update keybindings for toggling `menu` [#164](https://github.com/sectore/timr-tui/pull/164)
+
+### Misc.
+
+- (docs) Update all demos [#165](https://github.com/sectore/timr-tui/pull/165)
+- (deps) Update deps [#162](https://github.com/sectore/timr-tui/pull/162)
+- (deps) Rust 1.94.0 [#161](https://github.com/sectore/timr-tui/pull/161)
+
+## v1.7.1 - 2026-02-07
+
+### Fix
+
+- remove `Render` event handling entirely [#158](https://github.com/sectore/timr-tui/pull/158)
+- (perf) reduce CPU usage by implementing conditional redraws [#157](https://github.com/sectore/timr-tui/pull/157) by @fgbm.
+
+## v1.7.0 - 2026-02-02
+
+### Features
+
+- (pomodoro) change time by factor 10 [#154](https://github.com/sectore/timr-tui/issues/154)
+- (countdown) change local time by factor 10 [#153](https://github.com/sectore/timr-tui/issues/153)
+- (footer) re-style menu [#152](https://github.com/sectore/timr-tui/pull/152)
+- (keys) `start` / `stop` using `␣` key [#151](https://github.com/sectore/timr-tui/pull/151)
+
+### Fix
+
+- (nix) use `crossSystem` for `Windows` builds [#156](https://github.com/sectore/timr-tui/pull/156)
+- (sound) latest `rodio` breaks sound implementation [#149](https://github.com/sectore/timr-tui/issues/149)
+- (readme) typo [#145](https://github.com/sectore/timr-tui/issues/145) by @dnlzrgz
+
+### Misc.
+
+- (deps) Rust 1.93.0 [#150](https://github.com/sectore/timr-tui/pull/150)
+- use `dprint` as `Markdown` code formatter [#146](https://github.com/sectore/timr-tui/issues/146)
+- (deps) Latest Ratatui `v0.30.0` [#144](https://github.com/sectore/timr-tui/pull/144)
+- (readme) Installation instructions for `Nix` users [#143](https://github.com/sectore/timr-tui/pull/143)
+
+## v1.6.1 - 2025-10-29
+
+### Fix
+
+- (event) Ignore all key events except `KeyEventKind::Press` [#137](https://github.com/sectore/timr-tui/issues/137)
+
+### Misc.
+
+- (docs) Update all demos [#135](https://github.com/sectore/timr-tui/pull/135), [513f1fe](https://github.com/sectore/timr-tui/commit/513f1fec11ab8bdad46ca565b0c3f08ed37d6219)
+
+## v1.6.0 - 2025-10-16
+
+### Features
+
+- (event) New `event` screen to count custom date times in the future or past. [#117](https://github.com/sectore/timr-tui/pull/117), [#120](https://github.com/sectore/timr-tui/pull/120), [#122](https://github.com/sectore/timr-tui/pull/122), [#123](https://github.com/sectore/timr-tui/pull/123), [#124](https://github.com/sectore/timr-tui/pull/124), [#125](https://github.com/sectore/timr-tui/pull/125), [#129](https://github.com/sectore/timr-tui/pull/129), [#130](https://github.com/sectore/timr-tui/pull/130), [#131](https://github.com/sectore/timr-tui/pull/131), [#132](https://github.com/sectore/timr-tui/pull/132)
+- (keybindings) Switch screens by `←` or `→` keys [#127](https://github.com/sectore/timr-tui/pull/127)
+- (duration) Inrease `MAX_DURATION` to `9999y 364d 23:59:59.9` [#128](https://github.com/sectore/timr-tui/pull/128)
+
+### Breaking change
+
+- (pomodoro)! New keybindings `ctrl+←` or `ctrl+→` to switch `work`/`pause` [#127](https://github.com/sectore/timr-tui/pull/127)
+- (keybindings)! Change keys for `screens` [#126](https://github.com/sectore/timr-tui/pull/126)
+- (cli)! Remove `--countdown-target` argument [#121](https://github.com/sectore/timr-tui/pull/121)
+
+### Misc.
+
+- Add `AGENTS.md` [#133](https://github.com/sectore/timr-tui/pull/133)
+
 ## v1.5.0 - 2025-10-03
 
 ### Features
@@ -10,12 +83,10 @@
 - (edit) Change any value by `10x` up or down [#110](https://github.com/sectore/timr-tui/pull/110)
 - (timer/countdown): Support `days` and `years` up to `999y 364d 23:59:59` [#96](https://github.com/sectore/timr-tui/pull/96)
 
-
 ### Fix
 
 - (edit) Auto jump to next possible value while decreasing, but ignoring `zero` values [#109](https://github.com/sectore/timr-tui/pull/109)
 - (format) Improve format handling + fix `days` (no zero-padding) [#107](https://github.com/sectore/timr-tui/pull/107)
-
 
 ### Misc.
 
@@ -50,7 +121,7 @@
 
 ## v1.3.0 - 2025-05-06
 
-###
+### 
 
 - (pomodoro) Count WORK rounds [#75](https://github.com/sectore/timr-tui/pull/75), [6b068bb](https://github.com/sectore/timr-tui/commit/6b068bbd094d9ec1a36b47598fadfc71296d9590)
 - (pomodoro/countdown) Change initial value [#79](https://github.com/sectore/timr-tui/pull/79), [aae5c38](https://github.com/sectore/timr-tui/commit/aae5c38cd6a666d5ba418b12fb67879a2146b9a2)

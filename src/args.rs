@@ -1,6 +1,7 @@
 use crate::{
     common::{Content, Style, Toggle},
     duration,
+    event::{Event, parse_event},
 };
 #[cfg(feature = "sound")]
 use crate::{sound, sound::SoundError};
@@ -18,11 +19,6 @@ pub struct Args {
     )]
     pub countdown: Option<Duration>,
 
-    #[arg(long, visible_alias = "ct", value_parser = duration::parse_duration_by_time,
-        help = "Countdown targeting a specific time in the future or past. Formats: 'yyyy-mm-dd hh:mm:ss', 'yyyy-mm-dd hh:mm', 'hh:mm:ss', 'hh:mm', 'mm'"
-    )]
-    pub countdown_target: Option<duration::DirectedDuration>,
-
     #[arg(long, short, value_parser = duration::parse_duration,
         help = "Work time to count down from. Formats: 'ss', 'mm:ss', 'hh:mm:ss'"
     )]
@@ -32,6 +28,14 @@ pub struct Args {
         help = "Pause time to count down from. Formats: 'ss', 'mm:ss', 'hh:mm:ss'"
     )]
     pub pause: Option<Duration>,
+
+    #[arg(
+        long,
+        short = 'e',
+        value_parser = parse_event,
+        help = "Event date time and title (optional). Format: 'YYYY-MM-DD HH:MM:SS' or 'time=YYYY-MM-DD HH:MM:SS[,title=...]'. Examples: '2025-10-10 14:30:00' or 'time=2025-10-10 14:30:00,title=My Event'."
+    )]
+    pub event: Option<Event>,
 
     #[arg(long, short = 'd', help = "Show deciseconds.")]
     pub decis: bool,
@@ -45,6 +49,9 @@ pub struct Args {
     #[arg(long, value_enum, help = "Open menu.")]
     pub menu: bool,
 
+    #[arg(long, short = 'v', value_enum, help = "Enable/disable Vim motions.")]
+    pub vim: Option<Toggle>,
+
     #[arg(long, short = 'r', help = "Reset stored values to defaults.")]
     pub reset: bool,
 
@@ -52,14 +59,14 @@ pub struct Args {
         long,
         short,
         value_enum,
-        help = "Toggle desktop notifications. Experimental."
+        help = "Enable/disable desktop notifications. Experimental."
     )]
     pub notification: Option<Toggle>,
 
     #[arg(
         long,
         value_enum,
-        help = "Toggle blink mode to animate a clock when it reaches its finished mode."
+        help = "Enable/disable blink mode to animate a clock when it reaches its finished mode."
     )]
     pub blink: Option<Toggle>,
 

@@ -3,13 +3,12 @@ use crate::{
     constants::TICK_VALUE_MS,
     duration::{DurationEx, MAX_DURATION},
     events::{AppEventTx, TuiEvent, TuiEventHandler},
-    utils::center,
     widgets::{
         clock::{self, ClockState, ClockStateArgs, ClockWidget, Mode as ClockMode},
         edit_time::{EditTimeState, EditTimeStateArgs, EditTimeWidget},
     },
 };
-use crossterm::event::KeyModifiers;
+use crossterm::event::{Event as CrosstermEvent, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
     crossterm::event::KeyCode,
@@ -28,6 +27,7 @@ pub struct CountdownStateArgs {
     pub app_time: AppTime,
     pub with_decis: bool,
     pub app_tx: AppEventTx,
+    pub vim_motions: bool,
 }
 
 /// State for Countdown Widget
@@ -39,6 +39,8 @@ pub struct CountdownState {
     app_time: AppTime,
     /// Edit by local time
     edit_time: Option<EditTimeState>,
+    /// Whether Vim motions are enabled
+    vim_motions: bool,
 }
 
 impl CountdownState {
@@ -50,6 +52,7 @@ impl CountdownState {
             with_decis,
             app_time,
             app_tx,
+            vim_motions,
         } = args;
 
         Self {
@@ -78,6 +81,7 @@ impl CountdownState {
             }),
             app_time,
             edit_time: None,
+            vim_motions,
         }
     }
 
@@ -163,102 +167,164 @@ impl TuiEventHandler for CountdownState {
                 }
             }
             // EDIT CLOCK mode
-            TuiEvent::Key(key) if self.is_clock_edit_mode() => match key.code {
-                // skip editing
-                KeyCode::Esc => {
-                    // Important: set current value first
-                    self.clock.set_current_value(*self.clock.get_prev_value());
-                    // before toggling back to non-edit mode
-                    self.clock.toggle_edit();
-                }
-                // Apply changes and set new initial value
-                KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    // toggle edit mode
-                    self.clock.toggle_edit();
-                    // set initial value
-                    self.clock
-                        .set_initial_value(*self.clock.get_current_value());
-                    // always reset `elapsed_clock`
-                    self.elapsed_clock.reset();
-                }
-                // Apply changes
-                KeyCode::Char('s') => {
-                    // toggle edit mode
-                    self.clock.toggle_edit();
-                    // always reset `elapsed_clock`
-                    self.elapsed_clock.reset();
-                }
-                KeyCode::Right => {
-                    self.clock.edit_prev();
-                }
-                KeyCode::Left => {
-                    self.clock.edit_next();
-                }
-                KeyCode::Up if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    self.clock.edit_jump_up();
-                }
-                KeyCode::Up => {
-                    self.clock.edit_up();
-                }
-                KeyCode::Down if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    self.clock.edit_jump_down();
-                }
-                KeyCode::Down => {
-                    self.clock.edit_down();
-                }
-                _ => return Some(event),
-            },
-            // EDIT LOCAL TIME mode
-            TuiEvent::Key(key) if self.is_time_edit_mode() => match key.code {
-                // skip editing
-                KeyCode::Esc => {
-                    self.edit_time = None;
-                }
-                // Apply changes and set new initial value
-                KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    if let Some(edit_time) = &mut self.edit_time.clone() {
-                        // Order matters:
-                        // 1. update current value
-                        self.edit_time_done(edit_time);
-                        // 2. set initial value
+            TuiEvent::Crossterm(CrosstermEvent::Key(key)) if self.is_clock_edit_mode() => {
+                match key.code {
+                    // skip editing
+                    KeyCode::Esc => {
+                        // Important: set current value first
+                        self.clock.set_current_value(*self.clock.get_prev_value());
+                        // before toggling back to non-edit mode
+                        self.clock.toggle_edit();
+                    }
+                    // Apply changes and set new initial value
+                    KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        // toggle edit mode
+                        self.clock.toggle_edit();
+                        // set initial value
                         self.clock
                             .set_initial_value(*self.clock.get_current_value());
+                        // always reset `elapsed_clock`
+                        self.elapsed_clock.reset();
                     }
-                    // always reset `elapsed_clock`
-                    self.elapsed_clock.reset();
-                }
-                // Apply changes of editing by local time
-                KeyCode::Char('s') => {
-                    if let Some(edit_time) = &mut self.edit_time.clone() {
-                        self.edit_time_done(edit_time)
+                    // Apply changes
+                    KeyCode::Char('s') => {
+                        // toggle edit mode
+                        self.clock.toggle_edit();
+                        // always reset `elapsed_clock`
+                        self.elapsed_clock.reset();
                     }
-                    // always reset `elapsed_clock`
-                    self.elapsed_clock.reset();
+                    KeyCode::Right if !self.vim_motions => {
+                        self.clock.edit_prev();
+                    }
+                    KeyCode::Char('l') if self.vim_motions => {
+                        self.clock.edit_prev();
+                    }
+                    KeyCode::Left if !self.vim_motions => {
+                        self.clock.edit_next();
+                    }
+                    KeyCode::Char('h') if self.vim_motions => {
+                        self.clock.edit_next();
+                    }
+                    KeyCode::Up if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        self.clock.edit_jump_up();
+                    }
+                    KeyCode::Char('k')
+                        if key.modifiers.contains(KeyModifiers::CONTROL) && self.vim_motions =>
+                    {
+                        self.clock.edit_jump_up();
+                    }
+                    KeyCode::Up if !self.vim_motions => {
+                        self.clock.edit_up();
+                    }
+                    KeyCode::Char('k') if self.vim_motions => {
+                        self.clock.edit_up();
+                    }
+                    KeyCode::Down if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        self.clock.edit_jump_down();
+                    }
+                    KeyCode::Char('j')
+                        if key.modifiers.contains(KeyModifiers::CONTROL) && self.vim_motions =>
+                    {
+                        self.clock.edit_jump_down();
+                    }
+                    KeyCode::Down if !self.vim_motions => {
+                        self.clock.edit_down();
+                    }
+                    KeyCode::Char('j') if self.vim_motions => {
+                        self.clock.edit_down();
+                    }
+                    _ => return Some(event),
                 }
-                // move edit position to the left
-                KeyCode::Left => {
-                    // safe unwrap because we are in `is_time_edit_mode`
-                    self.edit_time.as_mut().unwrap().next();
+            }
+            // EDIT LOCAL TIME mode
+            TuiEvent::Crossterm(CrosstermEvent::Key(key)) if self.is_time_edit_mode() => {
+                match key.code {
+                    // skip editing
+                    KeyCode::Esc => {
+                        self.edit_time = None;
+                    }
+                    // Apply changes and set new initial value
+                    KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        if let Some(edit_time) = &mut self.edit_time.clone() {
+                            // Order matters:
+                            // 1. update current value
+                            self.edit_time_done(edit_time);
+                            // 2. set initial value
+                            self.clock
+                                .set_initial_value(*self.clock.get_current_value());
+                        }
+                        // always reset `elapsed_clock`
+                        self.elapsed_clock.reset();
+                    }
+                    // Apply changes of editing by local time
+                    KeyCode::Char('s') => {
+                        if let Some(edit_time) = &mut self.edit_time.clone() {
+                            self.edit_time_done(edit_time)
+                        }
+                        // always reset `elapsed_clock`
+                        self.elapsed_clock.reset();
+                    }
+                    // move edit position to the left
+                    KeyCode::Left if !self.vim_motions => {
+                        // safe unwrap because we are in `is_time_edit_mode`
+                        self.edit_time.as_mut().unwrap().next();
+                    }
+                    KeyCode::Char('h') if self.vim_motions => {
+                        // safe unwrap because we are in `is_time_edit_mode`
+                        self.edit_time.as_mut().unwrap().next();
+                    }
+                    // move edit position to the right
+                    KeyCode::Right if !self.vim_motions => {
+                        // safe unwrap because we are in `is_time_edit_mode`
+                        self.edit_time.as_mut().unwrap().prev();
+                    }
+                    KeyCode::Char('l') if self.vim_motions => {
+                        // safe unwrap because we are in `is_time_edit_mode`
+                        self.edit_time.as_mut().unwrap().prev();
+                    }
+                    // change value up
+                    KeyCode::Up if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        // safe unwrap because of previous check in `is_time_edit_mode`
+                        self.edit_time.as_mut().unwrap().jump_up();
+                    }
+                    KeyCode::Char('k')
+                        if key.modifiers.contains(KeyModifiers::CONTROL) && self.vim_motions =>
+                    {
+                        // safe unwrap because of previous check in `is_time_edit_mode`
+                        self.edit_time.as_mut().unwrap().jump_up();
+                    }
+                    KeyCode::Up if !self.vim_motions => {
+                        // safe unwrap because of previous check in `is_time_edit_mode`
+                        self.edit_time.as_mut().unwrap().up();
+                    }
+                    KeyCode::Char('k') if self.vim_motions => {
+                        // safe unwrap because of previous check in `is_time_edit_mode`
+                        self.edit_time.as_mut().unwrap().up();
+                    }
+                    // change value down
+                    KeyCode::Down if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        // safe unwrap because of previous check in `is_time_edit_mode`
+                        self.edit_time.as_mut().unwrap().jump_down();
+                    }
+                    KeyCode::Char('j')
+                        if key.modifiers.contains(KeyModifiers::CONTROL) && self.vim_motions =>
+                    {
+                        // safe unwrap because of previous check in `is_time_edit_mode`
+                        self.edit_time.as_mut().unwrap().jump_down();
+                    }
+                    KeyCode::Down if !self.vim_motions => {
+                        // safe unwrap because of previous check in `is_time_edit_mode`
+                        self.edit_time.as_mut().unwrap().down();
+                    }
+                    KeyCode::Char('j') if self.vim_motions => {
+                        // safe unwrap because of previous check in `is_time_edit_mode`
+                        self.edit_time.as_mut().unwrap().down();
+                    }
+                    _ => return Some(event),
                 }
-                // move edit position to the right
-                KeyCode::Right => {
-                    // safe unwrap because we are in `is_time_edit_mode`
-                    self.edit_time.as_mut().unwrap().prev();
-                }
-                // Value up
-                KeyCode::Up => {
-                    // safe unwrap because of previous check in `is_time_edit_mode`
-                    self.edit_time.as_mut().unwrap().up();
-                }
-                // Value down
-                KeyCode::Down => {
-                    // safe unwrap because of previous check in `is_time_edit_mode`
-                    self.edit_time.as_mut().unwrap().down();
-                }
-                _ => return Some(event),
-            },
+            }
             // default mode
-            TuiEvent::Key(key) => match key.code {
+            TuiEvent::Crossterm(CrosstermEvent::Key(key)) => match key.code {
                 KeyCode::Char('r') => {
                     // reset both clocks to use intial values
                     self.clock.reset();
@@ -270,7 +336,7 @@ impl TuiEventHandler for CountdownState {
                         edit_time.set_time(time);
                     }
                 }
-                KeyCode::Char('s') => {
+                KeyCode::Char(' ') => {
                     // toggle pause status depending on which clock is running
                     if !self.clock.is_done() {
                         self.clock.toggle_pause();
@@ -343,8 +409,7 @@ impl StatefulWidget for Countdown {
                 .to_uppercase(),
             );
             let widget = EditTimeWidget::new(self.style);
-            let area = center(
-                area,
+            let area = area.centered(
                 Constraint::Length(max(widget.get_width(), label.width() as u16)),
                 Constraint::Length(widget.get_height() + 1 /* height of label */),
             );
@@ -379,8 +444,7 @@ impl StatefulWidget for Countdown {
             );
             let widget = ClockWidget::new(self.style, self.blink);
 
-            let area = center(
-                area,
+            let area = area.centered(
                 Constraint::Length(max(
                     widget.get_width(state.clock.get_format(), state.clock.with_decis),
                     label.width() as u16,

@@ -2,13 +2,14 @@ use crate::{
     args::Args,
     common::{AppEditMode, AppTime, AppTimeFormat, ClockTypeId, Content, Style, Toggle},
     constants::TICK_VALUE_MS,
-    duration::DirectedDuration,
+    event::Event,
     events::{self, TuiEventHandler},
     storage::AppStorage,
     terminal::Terminal,
     widgets::{
         clock::{self, ClockState, ClockStateArgs},
         countdown::{Countdown, CountdownState, CountdownStateArgs},
+        event::{EventState, EventStateArgs, EventWidget},
         footer::{Footer, FooterState},
         header::Header,
         local_time::{LocalTimeState, LocalTimeStateArgs, LocalTimeWidget},
@@ -17,17 +18,21 @@ use crate::{
     },
 };
 
+use crossterm::event::Event as CrosstermEvent;
+
 #[cfg(feature = "sound")]
 use crate::sound::Sound;
+#[cfg(feature = "sound")]
+use std::path::PathBuf;
 
 use color_eyre::Result;
 use ratatui::{
     buffer::Buffer,
     crossterm::event::{KeyCode, KeyEvent},
-    layout::{Constraint, Layout, Rect},
+    layout::{Constraint, Layout, Position, Rect},
     widgets::{StatefulWidget, Widget},
 };
-use std::path::PathBuf;
+
 use std::time::Duration;
 use tracing::{debug, error};
 
@@ -42,17 +47,20 @@ pub struct App {
     mode: Mode,
     notification: Toggle,
     blink: Toggle,
-    #[allow(dead_code)] // w/ `--features sound` available only
-    sound_path: Option<PathBuf>,
+    #[cfg(feature = "sound")]
+    sound: Option<Sound>,
     app_time: AppTime,
     app_time_format: AppTimeFormat,
     countdown: CountdownState,
     timer: TimerState,
     pomodoro: PomodoroState,
+    event: EventState,
     local_time: LocalTimeState,
     style: Style,
     with_decis: bool,
+    vim_motions: bool,
     footer: FooterState,
+    cursor_position: Option<Position>,
 }
 
 pub struct AppArgs {
@@ -61,6 +69,7 @@ pub struct AppArgs {
     pub notification: Toggle,
     pub blink: Toggle,
     pub show_menu: bool,
+    pub vim_motions: bool,
     pub app_time_format: AppTimeFormat,
     pub content: Content,
     pub pomodoro_mode: PomodoroMode,
@@ -74,7 +83,9 @@ pub struct AppArgs {
     pub current_value_countdown: Duration,
     pub elapsed_value_countdown: Duration,
     pub current_value_timer: Duration,
+    pub event: Event,
     pub app_tx: events::AppEventTx,
+    #[cfg(feature = "sound")]
     pub sound_path: Option<PathBuf>,
     pub footer_toggle_app_time: Toggle,
 }
@@ -94,6 +105,7 @@ impl From<FromAppArgs> for App {
         App::new(AppArgs {
             with_decis: args.decis || stg.with_decis,
             show_menu: args.menu || stg.show_menu,
+            vim_motions: args.vim.unwrap_or(stg.vim).into(),
             notification: args.notification.unwrap_or(stg.notification),
             blink: args.blink.unwrap_or(stg.blink),
             app_time_format: stg.app_time_format,
@@ -104,8 +116,10 @@ impl From<FromAppArgs> for App {
                 None => {
                     if args.work.is_some() || args.pause.is_some() {
                         Content::Pomodoro
-                    } else if args.countdown.is_some() || args.countdown_target.is_some() {
+                    } else if args.countdown.is_some() {
                         Content::Countdown
+                    } else if args.event.is_some() {
+                        Content::Event
                     }
                     // in other case just use latest stored state
                     else {
@@ -123,35 +137,19 @@ impl From<FromAppArgs> for App {
             initial_value_pause: args.pause.unwrap_or(stg.inital_value_pause),
             // invalidate `current_value_pause` if an initial value is set via args
             current_value_pause: args.pause.unwrap_or(stg.current_value_pause),
-            initial_value_countdown: match (&args.countdown, &args.countdown_target) {
-                (Some(d), _) => *d,
-                (None, Some(DirectedDuration::Until(d))) => *d,
-                // reset for values from "past"
-                (None, Some(DirectedDuration::Since(_))) => Duration::ZERO,
-                (None, None) => stg.inital_value_countdown,
-            },
+            initial_value_countdown: args.countdown.unwrap_or(stg.inital_value_countdown),
             // invalidate `current_value_countdown` if an initial value is set via args
-            current_value_countdown: match (&args.countdown, &args.countdown_target) {
-                (Some(d), _) => *d,
-                (None, Some(DirectedDuration::Until(d))) => *d,
-                // `zero` makes values from `past` marked as `DONE`
-                (None, Some(DirectedDuration::Since(_))) => Duration::ZERO,
-                (None, None) => stg.inital_value_countdown,
-            },
-            elapsed_value_countdown: match (args.countdown, args.countdown_target) {
-                // use `Since` duration
-                (_, Some(DirectedDuration::Since(d))) => d,
-                // reset values
-                (_, Some(_)) => Duration::ZERO,
-                (Some(_), _) => Duration::ZERO,
-                (_, _) => stg.elapsed_value_countdown,
+            current_value_countdown: args.countdown.unwrap_or(stg.inital_value_countdown),
+            elapsed_value_countdown: match args.countdown {
+                // reset value if countdown is set by arguments
+                Some(_) => Duration::ZERO,
+                None => stg.elapsed_value_countdown,
             },
             current_value_timer: stg.current_value_timer,
+            event: args.event.unwrap_or(stg.event),
             app_tx,
             #[cfg(feature = "sound")]
             sound_path: args.sound,
-            #[cfg(not(feature = "sound"))]
-            sound_path: None,
             footer_toggle_app_time: stg.footer_app_time,
         })
     }
@@ -162,6 +160,7 @@ impl App {
         let AppArgs {
             style,
             show_menu,
+            vim_motions,
             app_time_format,
             initial_value_work,
             initial_value_pause,
@@ -175,25 +174,32 @@ impl App {
             with_decis,
             pomodoro_mode,
             pomodoro_round,
+            event,
             pomodoro_label,
             notification,
             blink,
-            sound_path,
             app_tx,
             footer_toggle_app_time,
+            #[cfg(feature = "sound")]
+            sound_path,
         } = args;
         let app_time = AppTime::new();
+
+        #[cfg(feature = "sound")]
+        let sound = sound_path.and_then(|path| Sound::new(path).ok());
 
         Self {
             mode: Mode::Running,
             notification,
             blink,
-            sound_path,
+            #[cfg(feature = "sound")]
+            sound,
             content,
             app_time,
             app_time_format,
             style,
             with_decis,
+            vim_motions,
             countdown: CountdownState::new(CountdownStateArgs {
                 initial_value: initial_value_countdown,
                 current_value: current_value_countdown,
@@ -201,6 +207,7 @@ impl App {
                 app_time,
                 with_decis,
                 app_tx: app_tx.clone(),
+                vim_motions,
             }),
             timer: TimerState::new(
                 ClockState::<clock::Timer>::new(ClockStateArgs {
@@ -211,6 +218,7 @@ impl App {
                     app_tx: Some(app_tx.clone()),
                 })
                 .with_name("Timer".to_owned()),
+                vim_motions,
             ),
             pomodoro: PomodoroState::new(PomodoroStateArgs {
                 mode: pomodoro_mode,
@@ -222,10 +230,17 @@ impl App {
                 round: pomodoro_round,
                 label: pomodoro_label,
                 app_tx: app_tx.clone(),
+                vim_motions,
             }),
             local_time: LocalTimeState::new(LocalTimeStateArgs {
                 app_time,
                 app_time_format,
+            }),
+            event: EventState::new(EventStateArgs {
+                app_time,
+                event,
+                with_decis,
+                app_tx: app_tx.clone(),
             }),
             footer: FooterState::new(
                 show_menu,
@@ -234,7 +249,9 @@ impl App {
                 } else {
                     None
                 },
+                vim_motions,
             ),
+            cursor_position: None,
         }
     }
 
@@ -248,10 +265,24 @@ impl App {
             debug!("Received key {:?}", key.code);
             match key.code {
                 KeyCode::Char('q') => app.mode = Mode::Quit,
-                KeyCode::Char('c') => app.content = Content::Countdown,
-                KeyCode::Char('t') => app.content = Content::Timer,
-                KeyCode::Char('p') => app.content = Content::Pomodoro,
-                KeyCode::Char('l') => app.content = Content::LocalTime,
+                KeyCode::Char('1') => app.content = Content::Countdown,
+                KeyCode::Char('2') => app.content = Content::Timer,
+                KeyCode::Char('3') => app.content = Content::Pomodoro,
+                KeyCode::Char('4') => app.content = Content::Event,
+                KeyCode::Char('0') => app.content = Content::LocalTime,
+                // switch `screens`
+                KeyCode::Right if !app.vim_motions => {
+                    app.content = app.content.next();
+                }
+                KeyCode::Char('l') if app.vim_motions => {
+                    app.content = app.content.next();
+                }
+                KeyCode::Left if !app.vim_motions => {
+                    app.content = app.content.prev();
+                }
+                KeyCode::Char('h') if app.vim_motions => {
+                    app.content = app.content.prev();
+                }
                 // toogle app time format
                 KeyCode::Char(':') => {
                     if app.content == Content::LocalTime {
@@ -284,8 +315,6 @@ impl App {
                         app.footer.set_app_time_format(new_format);
                     }
                 }
-                // toogle menu
-                KeyCode::Char('m') => app.footer.set_show_menu(!app.footer.get_show_menu()),
                 KeyCode::Char(',') => {
                     app.style = app.style.next();
                 }
@@ -295,41 +324,50 @@ impl App {
                     app.timer.set_with_decis(app.with_decis);
                     app.countdown.set_with_decis(app.with_decis);
                     app.pomodoro.set_with_decis(app.with_decis);
+                    app.event.set_with_decis(app.with_decis);
                 }
-                KeyCode::Up => app.footer.set_show_menu(true),
-                KeyCode::Down => app.footer.set_show_menu(false),
+                // toogle menu
+                KeyCode::Char('m') => app.footer.set_show_menu(!app.footer.get_show_menu()),
                 _ => {}
             };
         };
         // Closure to handle `TuiEvent`'s
-        let mut handle_tui_events = |app: &mut Self, event: events::TuiEvent| -> Result<()> {
+        // It returns a flag (bool) whether the app needs to be re-drawn or not
+        let handle_tui_events = |app: &mut Self, event: events::TuiEvent| -> Result<bool> {
             if matches!(event, events::TuiEvent::Tick) {
                 app.app_time = AppTime::new();
                 app.countdown.set_app_time(app.app_time);
                 app.local_time.set_app_time(app.app_time);
+                app.event.set_app_time(app.app_time);
             }
 
             // Pipe events into subviews and handle only 'unhandled' events afterwards
-            if let Some(unhandled) = match app.content {
+            let unhandled = match app.content {
                 Content::Countdown => app.countdown.update(event.clone()),
                 Content::Timer => app.timer.update(event.clone()),
                 Content::Pomodoro => app.pomodoro.update(event.clone()),
+                Content::Event => app.event.update(event.clone()),
                 Content::LocalTime => app.local_time.update(event.clone()),
-            } {
-                match unhandled {
-                    events::TuiEvent::Render | events::TuiEvent::Resize => {
-                        app.draw(terminal)?;
-                    }
-                    events::TuiEvent::Key(key) => handle_key_event(app, key),
-                    _ => {}
-                }
+            };
+            // from all 'unhandled' events we are interested in `CrosstermEvent::Key` only
+            if let Some(events::TuiEvent::Crossterm(CrosstermEvent::Key(key))) = unhandled {
+                handle_key_event(app, key);
             }
-            Ok(())
+
+            // Trigger re-draw for specific events only.
+            let trigger_redraw = matches!(
+                event,
+                events::TuiEvent::Tick
+                    | events::TuiEvent::Crossterm(CrosstermEvent::Key(_))
+                    | events::TuiEvent::Crossterm(CrosstermEvent::Resize(_, _))
+            );
+            Ok(trigger_redraw)
         };
 
-        #[allow(unused_variables)] // `app` is used by `--features sound` only
         // Closure to handle `AppEvent`'s
-        let handle_app_events = |app: &mut Self, event: events::AppEvent| -> Result<()> {
+        // It returns a flag (bool) whether the app needs to be re-drawn or not
+        let handle_app_events = |app: &mut Self, event: events::AppEvent| -> Result<bool> {
+            let mut trigger_redraw = false;
             match event {
                 events::AppEvent::ClockDone(type_id, name) => {
                     debug!("AppEvent::ClockDone");
@@ -351,24 +389,34 @@ impl App {
                     };
 
                     #[cfg(feature = "sound")]
-                    if let Some(path) = app.sound_path.clone() {
-                        _ = Sound::new(path).and_then(|sound| sound.play()).or_else(
-                            |err| -> Result<()> {
-                                error!("Sound error: {:?}", err);
-                                Ok(())
-                            },
-                        );
+                    if let Some(sound) = &app.sound {
+                        if let Err(err) = sound.play() {
+                            error!("Sound error: {:?}", err);
+                        }
                     }
                 }
+                events::AppEvent::SetCursor(position) => {
+                    app.cursor_position = position;
+                    // Trigger re-draw by setting cursor smoothly
+                    trigger_redraw = true;
+                }
             }
-            Ok(())
+            Ok(trigger_redraw)
         };
 
         while self.is_running() {
             if let Some(event) = events.next().await {
-                let _ = match event {
-                    events::Event::Terminal(e) => handle_tui_events(&mut self, e),
-                    events::Event::App(e) => handle_app_events(&mut self, e),
+                match event {
+                    events::Event::Terminal(e) => {
+                        if let Ok(true) = handle_tui_events(&mut self, e) {
+                            self.draw(terminal)?;
+                        }
+                    }
+                    events::Event::App(e) => {
+                        if let Ok(true) = handle_app_events(&mut self, e) {
+                            self.draw(terminal)?;
+                        }
+                    }
                 };
             }
         }
@@ -407,6 +455,13 @@ impl App {
                     AppEditMode::None
                 }
             }
+            Content::Event => {
+                if self.event.is_edit_mode() {
+                    AppEditMode::Event
+                } else {
+                    AppEditMode::None
+                }
+            }
             Content::LocalTime => AppEditMode::None,
         }
     }
@@ -416,6 +471,8 @@ impl App {
             Content::Countdown => self.countdown.is_running(),
             Content::Timer => self.timer.get_clock().is_running(),
             Content::Pomodoro => self.pomodoro.get_clock().is_running(),
+            // Event clock runs forever
+            Content::Event => true,
             // `LocalTime` does not use a `Clock`
             Content::LocalTime => false,
         }
@@ -426,6 +483,7 @@ impl App {
             Content::Countdown => Some(self.countdown.get_clock().get_percentage_done()),
             Content::Timer => None,
             Content::Pomodoro => Some(self.pomodoro.get_clock().get_percentage_done()),
+            Content::Event => Some(self.event.get_percentage_done()),
             Content::LocalTime => None,
         }
     }
@@ -433,6 +491,11 @@ impl App {
     fn draw(&mut self, terminal: &mut Terminal) -> Result<()> {
         terminal.draw(|frame| {
             frame.render_stateful_widget(AppWidget, frame.area(), self);
+
+            // Set cursor position if requested
+            if let Some(position) = self.cursor_position {
+                frame.set_cursor_position(position);
+            }
         })?;
         Ok(())
     }
@@ -441,6 +504,7 @@ impl App {
         AppStorage {
             content: self.content,
             show_menu: self.footer.get_show_menu(),
+            vim: self.vim_motions.into(),
             notification: self.notification,
             blink: self.blink,
             app_time_format: self.app_time_format,
@@ -463,6 +527,7 @@ impl App {
             ),
             elapsed_value_countdown: Duration::from(*self.countdown.get_elapsed_value()),
             current_value_timer: Duration::from(*self.timer.get_clock().get_current_value()),
+            event: self.event.get_event(),
             footer_app_time: self.footer.app_time_format().is_some().into(),
             pomodoro_history: Vec::new(), // History is loaded from storage, not generated here
         }
@@ -491,6 +556,11 @@ impl AppWidget {
                 blink: state.blink == Toggle::On,
             }
             .render(area, buf, &mut state.pomodoro),
+            Content::Event => EventWidget {
+                style: state.style,
+                blink: state.blink == Toggle::On,
+            }
+            .render(area, buf, &mut state.event),
             Content::LocalTime => {
                 LocalTimeWidget { style: state.style }.render(area, buf, &mut state.local_time);
             }

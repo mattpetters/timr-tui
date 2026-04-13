@@ -8,9 +8,8 @@ use ratatui::{
 
 use crate::{
     common::{AppTime, AppTimeFormat, Style as DigitStyle},
-    duration::DurationEx,
+    duration::{ClockDuration, DurationEx},
     events::{TuiEvent, TuiEventHandler},
-    utils::center,
     widgets::clock_elements::{
         COLON_WIDTH, Colon, DIGIT_HEIGHT, DIGIT_SPACE_WIDTH, DIGIT_WIDTH, Digit,
     },
@@ -52,6 +51,7 @@ impl LocalTimeState {
 
 impl TuiEventHandler for LocalTimeState {
     fn update(&mut self, event: TuiEvent) -> Option<TuiEvent> {
+        // we don't handle any event in this widget,
         Some(event)
     }
 }
@@ -137,8 +137,7 @@ impl StatefulWidget for LocalTimeWidget {
             1, // date
         ];
 
-        let area = center(
-            area,
+        let area = area.centered(
             Constraint::Length(content_width),
             Constraint::Length(v_heights.iter().sum()),
         );

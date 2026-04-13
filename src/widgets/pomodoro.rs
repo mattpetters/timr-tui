@@ -2,10 +2,9 @@ use crate::{
     common::Style,
     constants::TICK_VALUE_MS,
     events::{AppEventTx, TuiEvent, TuiEventHandler},
-    utils::center,
     widgets::clock::{ClockState, ClockStateArgs, ClockWidget, Countdown},
 };
-use crossterm::event::{KeyCode, KeyModifiers};
+use crossterm::event::{Event as CrosstermEvent, KeyCode, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Layout, Rect},
@@ -46,6 +45,7 @@ pub struct PomodoroState {
     mode: Mode,
     clock_map: ClockMap,
     round: u64,
+    vim_motions: bool,
     label: String,
     label_edit_mode: bool,
 }
@@ -59,6 +59,7 @@ pub struct PomodoroStateArgs {
     pub with_decis: bool,
     pub app_tx: AppEventTx,
     pub round: u64,
+    pub vim_motions: bool,
     pub label: String,
 }
 
@@ -73,6 +74,7 @@ impl PomodoroState {
             with_decis,
             app_tx,
             round,
+            vim_motions,
             label,
         } = args;
         Self {
@@ -96,6 +98,7 @@ impl PomodoroState {
                 .with_name("Pause".to_owned()),
             },
             round,
+            vim_motions,
             label,
             label_edit_mode: false,
         }
@@ -172,7 +175,7 @@ impl TuiEventHandler for PomodoroState {
                 self.get_clock_mut().update_done_count();
             }
             // LABEL EDIT mode
-            TuiEvent::Key(key) if label_edit_mode => match key.code {
+            TuiEvent::Crossterm(CrosstermEvent::Key(key)) if label_edit_mode => match key.code {
                 KeyCode::Enter | KeyCode::Esc => {
                     self.toggle_label_edit_mode();
                 }
@@ -185,7 +188,7 @@ impl TuiEventHandler for PomodoroState {
                 _ => return Some(event),
             },
             // CLOCK EDIT mode
-            TuiEvent::Key(key) if edit_mode => match key.code {
+            TuiEvent::Crossterm(CrosstermEvent::Key(key)) if edit_mode => match key.code {
                 // Skip changes
                 KeyCode::Esc => {
                     let clock = self.get_clock_mut();
@@ -205,28 +208,56 @@ impl TuiEventHandler for PomodoroState {
                 KeyCode::Char('s') => {
                     self.get_clock_mut().toggle_edit();
                 }
-                // Value up
-                KeyCode::Up => {
+                // change value up
+                KeyCode::Up if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.get_clock_mut().edit_jump_up();
+                }
+                KeyCode::Char('k')
+                    if key.modifiers.contains(KeyModifiers::CONTROL) && self.vim_motions =>
+                {
+                    self.get_clock_mut().edit_jump_up();
+                }
+                KeyCode::Up if !self.vim_motions => {
                     self.get_clock_mut().edit_up();
                 }
-                // Value down
-                KeyCode::Down => {
+                KeyCode::Char('k') if self.vim_motions => {
+                    self.get_clock_mut().edit_up();
+                }
+                // change value down
+                KeyCode::Down if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.get_clock_mut().edit_jump_down();
+                }
+                KeyCode::Char('j')
+                    if key.modifiers.contains(KeyModifiers::CONTROL) && self.vim_motions =>
+                {
+                    self.get_clock_mut().edit_jump_down();
+                }
+                KeyCode::Down if !self.vim_motions => {
+                    self.get_clock_mut().edit_down();
+                }
+                KeyCode::Char('j') if self.vim_motions => {
                     self.get_clock_mut().edit_down();
                 }
                 // move edit position to the left
-                KeyCode::Left => {
+                KeyCode::Left if !self.vim_motions => {
+                    self.get_clock_mut().edit_next();
+                }
+                KeyCode::Char('h') if self.vim_motions => {
                     self.get_clock_mut().edit_next();
                 }
                 // move edit position to the right
-                KeyCode::Right => {
+                KeyCode::Right if !self.vim_motions => {
+                    self.get_clock_mut().edit_prev();
+                }
+                KeyCode::Char('l') if self.vim_motions => {
                     self.get_clock_mut().edit_prev();
                 }
                 _ => return Some(event),
             },
             // default mode
-            TuiEvent::Key(key) => match key.code {
+            TuiEvent::Crossterm(CrosstermEvent::Key(key)) => match key.code {
                 // Toggle run/pause
-                KeyCode::Char('s') => {
+                KeyCode::Char(' ') | KeyCode::Char('s') /* TODO: deprecated, remove it in next version */ => {
                     self.get_clock_mut().toggle_pause();
                 }
                 // Enter edit mode
@@ -238,12 +269,18 @@ impl TuiEventHandler for PomodoroState {
                     self.toggle_label_edit_mode();
                 }
                 // toggle WORK/PAUSE
-                KeyCode::Left => {
+                KeyCode::Left if key.modifiers.contains(KeyModifiers::CONTROL) && !self.vim_motions => {
                     // `next` is acting as same as a "prev" function we don't have
                     self.next();
                 }
+                KeyCode::Char('h') if key.modifiers.contains(KeyModifiers::CONTROL) && self.vim_motions => {
+                    self.next();
+                }
                 // toggle WORK/PAUSE
-                KeyCode::Right => {
+                KeyCode::Right if key.modifiers.contains(KeyModifiers::CONTROL) && !self.vim_motions => {
+                    self.next();
+                }
+                KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) && self.vim_motions => {
                     self.next();
                 }
                 // reset rounds AND clocks
@@ -296,8 +333,7 @@ impl StatefulWidget for PomodoroWidget {
             Line::raw("")
         };
 
-        let area = center(
-            area,
+        let area = area.centered(
             Constraint::Length(max(
                 max(
                     clock_widget
@@ -349,7 +385,14 @@ mod tests {
             app_tx,
             round: 1,
             label: String::new(),
+            vim_motions: false,
         }
+    }
+
+    fn key_event(code: crossterm::event::KeyCode) -> TuiEvent {
+        TuiEvent::Crossterm(crossterm::event::Event::Key(
+            crossterm::event::KeyEvent::from(code),
+        ))
     }
 
     #[test]
@@ -391,25 +434,15 @@ mod tests {
         assert!(state.is_label_edit_mode());
 
         // Type some characters
-        state.update(TuiEvent::Key(crossterm::event::KeyEvent::from(
-            crossterm::event::KeyCode::Char('t')
-        )));
-        state.update(TuiEvent::Key(crossterm::event::KeyEvent::from(
-            crossterm::event::KeyCode::Char('e')
-        )));
-        state.update(TuiEvent::Key(crossterm::event::KeyEvent::from(
-            crossterm::event::KeyCode::Char('s')
-        )));
-        state.update(TuiEvent::Key(crossterm::event::KeyEvent::from(
-            crossterm::event::KeyCode::Char('t')
-        )));
+        state.update(key_event(crossterm::event::KeyCode::Char('t')));
+        state.update(key_event(crossterm::event::KeyCode::Char('e')));
+        state.update(key_event(crossterm::event::KeyCode::Char('s')));
+        state.update(key_event(crossterm::event::KeyCode::Char('t')));
 
         assert_eq!(state.get_label(), "test");
 
         // Exit edit mode
-        state.update(TuiEvent::Key(crossterm::event::KeyEvent::from(
-            crossterm::event::KeyCode::Enter
-        )));
+        state.update(key_event(crossterm::event::KeyCode::Enter));
         assert!(!state.is_label_edit_mode());
         assert_eq!(state.get_label(), "test");
     }
@@ -422,19 +455,13 @@ mod tests {
 
         // Type "hello"
         for c in ['h', 'e', 'l', 'l', 'o'] {
-            state.update(TuiEvent::Key(crossterm::event::KeyEvent::from(
-                crossterm::event::KeyCode::Char(c)
-            )));
+            state.update(key_event(crossterm::event::KeyCode::Char(c)));
         }
         assert_eq!(state.get_label(), "hello");
 
         // Backspace twice
-        state.update(TuiEvent::Key(crossterm::event::KeyEvent::from(
-            crossterm::event::KeyCode::Backspace
-        )));
-        state.update(TuiEvent::Key(crossterm::event::KeyEvent::from(
-            crossterm::event::KeyCode::Backspace
-        )));
+        state.update(key_event(crossterm::event::KeyCode::Backspace));
+        state.update(key_event(crossterm::event::KeyCode::Backspace));
 
         assert_eq!(state.get_label(), "hel");
     }
@@ -446,9 +473,7 @@ mod tests {
         state.toggle_label_edit_mode();
         assert!(state.is_label_edit_mode());
 
-        state.update(TuiEvent::Key(crossterm::event::KeyEvent::from(
-            crossterm::event::KeyCode::Esc
-        )));
+        state.update(key_event(crossterm::event::KeyCode::Esc));
 
         assert!(!state.is_label_edit_mode());
     }

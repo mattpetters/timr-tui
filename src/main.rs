@@ -2,6 +2,7 @@ mod app;
 mod common;
 mod config;
 mod constants;
+mod event;
 mod events;
 mod logging;
 
@@ -9,7 +10,6 @@ mod args;
 mod duration;
 mod storage;
 mod terminal;
-mod utils;
 mod widgets;
 
 #[cfg(feature = "sound")]

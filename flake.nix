@@ -19,13 +19,11 @@
     flake-utils.lib.eachDefaultSystem (system: let
       pkgs = nixpkgs.legacyPackages.${system};
 
-      toolchain =
-        fenix.packages.${system}.fromToolchainFile
-        {
-          file = ./rust-toolchain.toml;
-          # sha256 = nixpkgs.lib.fakeSha256;
-          sha256 = "sha256-SJwZ8g0zF2WrKDVmHrVG3pD2RGoQeo24MEXnNx5FyuI=";
-        };
+      toolchain = fenix.packages.${system}.fromToolchainFile {
+        file = ./rust-toolchain.toml;
+        # sha256 = nixpkgs.lib.fakeSha256;
+        sha256 = "sha256-qqF33vNuAdU5vua96VKVIwuc43j4EFeEXbjQ6+l4mO4=";
+      };
 
       craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
 
@@ -48,26 +46,54 @@
           CARGO_BUILD_RUSTFLAGS = "-C target-feature=+crt-static";
         });
 
+      vhs = pkgs.buildGoModule (finalAttrs: {
+        pname = "vhs";
+        version = "0.11.0";
+
+        src = pkgs.fetchFromGitHub {
+          owner = "charmbracelet";
+          repo = "vhs";
+          tag = "v${finalAttrs.version}";
+          # hash = nixpkgs.lib.fakeSha256;
+          hash = "sha256-VOiI+ddiax04QtCcDr6ze53kd/HHGbfQE3j/32iq4Ro=";
+        };
+
+        # vendorHash = nixpkgs.lib.fakeSha256;
+        vendorHash = "sha256-cgKLYUATtn4hMdIOXZe9JWYNUOrX3S6BDfvS+rIWDfM=";
+
+        nativeBuildInputs = [pkgs.makeBinaryWrapper];
+
+        ldflags = [
+          "-s"
+          "-w"
+          "-X=main.Version=${finalAttrs.version}"
+        ];
+
+        postInstall = ''
+          wrapProgram $out/bin/vhs --prefix PATH : ${
+            pkgs.lib.makeBinPath (
+              [pkgs.ffmpeg pkgs.ttyd]
+              ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [pkgs.chromium]
+            )
+          }
+        '';
+      });
+
       # Windows cross-compilation build
       # @see https://crane.dev/examples/cross-windows.html
-      windowsBuild = craneLib.buildPackage {
-        inherit (commonArgs) src strictDeps doCheck;
-
-        CARGO_BUILD_TARGET = "x86_64-pc-windows-gnu";
-
-        # fixes issues related to libring
-        TARGET_CC = "${pkgs.pkgsCross.mingwW64.stdenv.cc}/bin/${pkgs.pkgsCross.mingwW64.stdenv.cc.targetPrefix}cc";
-
-        #fixes issues related to openssl
-        OPENSSL_DIR = "${pkgs.openssl.dev}";
-        OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
-        OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include/";
-
-        depsBuildBuild = with pkgs; [
-          pkgsCross.mingwW64.stdenv.cc
-          pkgsCross.mingwW64.windows.pthreads
-        ];
-      };
+      windowsBuild = let
+        pkgsWindows = import nixpkgs {
+          localSystem = system;
+          crossSystem = {
+            config = "x86_64-w64-mingw32";
+            libc = "msvcrt";
+          };
+        };
+        craneLibWindows = (crane.mkLib pkgsWindows).overrideToolchain (p: toolchain);
+      in
+        craneLibWindows.buildPackage {
+          inherit (commonArgs) src strictDeps doCheck;
+        };
     in {
       packages = {
         inherit timr;
@@ -81,9 +107,11 @@
           packages =
             [
               toolchain
+              vhs
               pkgs.just
               pkgs.nixd
               pkgs.alejandra
+              pkgs.dprint
             ]
             # pkgs needed to play sound on Linux
             ++ lib.optionals stdenv.isLinux [
