@@ -8,7 +8,6 @@ use time::{OffsetDateTime, format_description};
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Default, Serialize, Deserialize,
 )]
 pub enum Content {
-    #[default]
     #[value(name = "countdown", alias = "c")]
     Countdown,
     #[value(name = "timer", alias = "t")]
@@ -17,6 +16,7 @@ pub enum Content {
     Pomodoro,
     #[value(name = "event", alias = "e")]
     Event,
+    #[default]
     #[value(name = "localtime", alias = "l")]
     LocalTime,
 }
@@ -101,17 +101,19 @@ impl Style {
 #[derive(Debug, Clone, Copy, Default, PartialEq, EnumString, Serialize, Deserialize)]
 pub enum AppTimeFormat {
     /// `hh:mm:ss`
-    #[default]
     HhMmSs,
     /// `hh:mm`
     HhMm,
     /// `hh:mm AM` (or PM)
     Hh12Mm,
+    /// `hh:mm:ss AM` (or PM)
+    #[default]
+    Hh12MmSs,
 }
 
 impl AppTimeFormat {
     pub const fn first() -> Self {
-        Self::HhMmSs
+        Self::Hh12MmSs
     }
 
     pub const fn last() -> Self {
@@ -122,7 +124,8 @@ impl AppTimeFormat {
         match self {
             AppTimeFormat::HhMmSs => AppTimeFormat::HhMm,
             AppTimeFormat::HhMm => AppTimeFormat::Hh12Mm,
-            AppTimeFormat::Hh12Mm => AppTimeFormat::HhMmSs,
+            AppTimeFormat::Hh12Mm => AppTimeFormat::Hh12MmSs,
+            AppTimeFormat::Hh12MmSs => AppTimeFormat::HhMmSs,
         }
     }
 }
@@ -156,6 +159,7 @@ impl AppTime {
             AppTimeFormat::HhMmSs => "[hour]:[minute]:[second]",
             AppTimeFormat::HhMm => "[hour]:[minute]",
             AppTimeFormat::Hh12Mm => "[hour repr:12 padding:none]:[minute] [period]",
+            AppTimeFormat::Hh12MmSs => "[hour repr:12 padding:none]:[minute]:[second] [period]",
         };
 
         format_description::parse(parse_str)
@@ -285,6 +289,30 @@ mod tests {
             "6:06 PM",
             "local"
         );
+        // hh:mm:ss period
+        assert_eq!(
+            AppTime::Utc(dt).format(&AppTimeFormat::Hh12MmSs),
+            "6:06:10 PM",
+            "utc"
+        );
+        assert_eq!(
+            AppTime::Local(dt).format(&AppTimeFormat::Hh12MmSs),
+            "6:06:10 PM",
+            "local"
+        );
+    }
+
+    #[test]
+    fn test_app_time_format_cycle() {
+        let mut f = AppTimeFormat::first();
+        let mut seen = 1;
+        while f != AppTimeFormat::last() {
+            f = f.next();
+            seen += 1;
+        }
+        assert_eq!(seen, 4, "cycle visits every format once");
+        assert_eq!(f.next(), AppTimeFormat::first(), "last wraps to first");
+        assert_eq!(AppTimeFormat::default(), AppTimeFormat::first());
     }
 
     #[test]

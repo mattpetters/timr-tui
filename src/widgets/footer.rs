@@ -370,7 +370,7 @@ impl StatefulWidget for Footer {
                                                 Span::styled("edit down fast", ITALIC),
                                             ]
                                         }
-                                    },
+                                    }
                                 }
                             })),
                         ]
