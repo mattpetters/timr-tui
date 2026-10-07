@@ -1,8 +1,9 @@
 use crate::constants::APP_NAME;
 use color_eyre::eyre::{Result, eyre};
-use directories::ProjectDirs;
+use directories::BaseDirs;
+use std::ffi::OsString;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub struct Config {
     pub log_dir: PathBuf,
@@ -23,19 +24,43 @@ impl Config {
     }
 }
 
-pub fn get_project_dir() -> Result<ProjectDirs> {
-    let dirs = ProjectDirs::from("", "", APP_NAME)
-        .ok_or_else(|| eyre!("Failed to get project directories"))?;
-
-    Ok(dirs)
+/// XDG state dir on every platform: `$XDG_STATE_HOME/timr-tui`,
+/// falling back to `~/.local/state/timr-tui`.
+fn get_default_state_dir() -> Result<PathBuf> {
+    let base = BaseDirs::new().ok_or_else(|| eyre!("Failed to get home directory"))?;
+    Ok(state_dir(
+        std::env::var_os("XDG_STATE_HOME"),
+        base.home_dir(),
+    ))
 }
 
-fn get_default_state_dir() -> Result<PathBuf> {
-    let dirs = get_project_dir()?;
-    let directory: PathBuf = dirs
-        .state_dir()
-        .unwrap_or_else(|| dirs.data_local_dir())
-        .to_path_buf();
+fn state_dir(xdg_state_home: Option<OsString>, home: &Path) -> PathBuf {
+    xdg_state_home
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".local").join("state"))
+        .join(APP_NAME)
+}
 
-    Ok(directory)
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_state_dir() {
+        let home = Path::new("/home/me");
+        assert_eq!(
+            state_dir(None, home),
+            PathBuf::from("/home/me/.local/state/timr-tui")
+        );
+        assert_eq!(
+            state_dir(Some("".into()), home),
+            PathBuf::from("/home/me/.local/state/timr-tui"),
+            "empty XDG_STATE_HOME is treated as unset"
+        );
+        assert_eq!(
+            state_dir(Some("/tmp/state".into()), home),
+            PathBuf::from("/tmp/state/timr-tui")
+        );
+    }
 }

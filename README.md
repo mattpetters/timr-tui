@@ -352,12 +352,9 @@ cargo test
 Stored on file system:
 
 ```sh
-# Linux
+$XDG_STATE_HOME/timr-tui/data/app.data
+# or, if `XDG_STATE_HOME` is unset (all platforms, including macOS)
 ~/.local/state/timr-tui/data/app.data
-# macOS
-/Users/{user}/Library/Application Support/timr-tui/data/app.data
-# Windows
-C:/Users/{user}/AppData/Local/timr-tui/data/app.data
 ```
 
 ## Logs
@@ -367,12 +364,9 @@ To get log output, start the app by passing `--log` to `timr-tui`. See [CLI](./#
 Logs will be stored in an `app.log` file at following locations:
 
 ```sh
-# Linux
+$XDG_STATE_HOME/timr-tui/logs/app.log
+# or, if `XDG_STATE_HOME` is unset (all platforms, including macOS)
 ~/.local/state/timr-tui/logs/app.log
-# macOS
-/Users/{user}/Library/Application Support/timr-tui/logs/app.log
-# `Windows`
-C:/Users/{user}/AppData/Local/timr-tui/logs/app.log
 ```
 
 Optional: You can use a custom directory by passing it via `--log` arg.

@@ -100,6 +100,22 @@ impl LocalTimeWidget {
                 DIGIT_SPACE_WIDTH,                // (space)
                 PERIOD_WIDTH,                     // period
             ],
+            AppTimeFormat::Hh12MmSs => vec![
+                DIGIT_SPACE_WIDTH + PERIOD_WIDTH, // (space) + (empty period) to center everything well horizontally
+                DIGIT_WIDTH,                      // H
+                DIGIT_SPACE_WIDTH,                // (space)
+                DIGIT_WIDTH,                      // h
+                COLON_WIDTH,                      // :
+                DIGIT_WIDTH,                      // M
+                DIGIT_SPACE_WIDTH,                // (space)
+                DIGIT_WIDTH,                      // m
+                COLON_WIDTH,                      // :
+                DIGIT_WIDTH,                      // S
+                DIGIT_SPACE_WIDTH,                // (space)
+                DIGIT_WIDTH,                      // s
+                DIGIT_SPACE_WIDTH,                // (space)
+                PERIOD_WIDTH,                     // period
+            ],
         }
     }
 }
@@ -121,9 +137,13 @@ impl StatefulWidget for LocalTimeWidget {
         let format = state.format;
         let widths = self.get_horizontal_lengths(&format);
         let mut widths = widths;
-        // Special case for `Hh12Mm`
+        // Special case for 12-hour formats
         // It might be `h:Mm` OR `Hh:Mm` depending on `hours12`
-        if state.format == AppTimeFormat::Hh12Mm && hours12 < 10 {
+        if matches!(
+            state.format,
+            AppTimeFormat::Hh12Mm | AppTimeFormat::Hh12MmSs
+        ) && hours12 < 10
+        {
             // single digit means, no (zero) width's for `H` and `space`
             widths[1] = 0; // `H`
             widths[2] = 0; // `space`
@@ -181,6 +201,30 @@ impl StatefulWidget for LocalTimeWidget {
                 Colon::new(symbol).render(c_hm, buf);
                 Digit::new(minutes / 10, false, symbol).render(mm, buf);
                 Digit::new(minutes % 10, false, symbol).render(m, buf);
+                Span::styled(
+                    state.time.get_period().to_uppercase(),
+                    Style::default().add_modifier(Modifier::BOLD),
+                )
+                .render(p, buf);
+            }
+            AppTimeFormat::Hh12MmSs => {
+                let [_, hh, _, h, c_hm, mm, _, m, c_ms, ss, _, s, _, p] =
+                    Layout::horizontal(Constraint::from_lengths(widths)).areas(v1);
+                // Hh
+                if hours12 >= 10 {
+                    Digit::new(hours12 / 10, false, symbol).render(hh, buf);
+                    Digit::new(hours12 % 10, false, symbol).render(h, buf);
+                }
+                // h
+                else {
+                    Digit::new(hours12, false, symbol).render(h, buf);
+                }
+                Colon::new(symbol).render(c_hm, buf);
+                Digit::new(minutes / 10, false, symbol).render(mm, buf);
+                Digit::new(minutes % 10, false, symbol).render(m, buf);
+                Colon::new(symbol).render(c_ms, buf);
+                Digit::new(seconds / 10, false, symbol).render(ss, buf);
+                Digit::new(seconds % 10, false, symbol).render(s, buf);
                 Span::styled(
                     state.time.get_period().to_uppercase(),
                     Style::default().add_modifier(Modifier::BOLD),
